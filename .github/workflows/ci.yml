@@ -64,8 +64,8 @@ jobs:
           mkdir -p ~/Library/Audio/Plug-Ins/Components
           cp -R build/macos/bin/HiddenValleyMC.component ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar 2>/dev/null || true
-          for _ in $(seq 1 15); do auval -s aufx 2>/dev/null | grep -q "CPeq Cbrk" && break; sleep 2; done
-          auval -strict -v aufx CPeq Cbrk
+          for _ in $(seq 1 15); do auval -s aufx 2>/dev/null | grep -q "HVmc Cbrk" && break; sleep 2; done
+          auval -strict -v aufx HVmc Cbrk
       - uses: actions/upload-artifact@v7
         with:
           name: HiddenValleyMC-macos-universal
@@ -88,6 +88,9 @@ jobs:
       - name: Build (DSP unit tests, run natively, then the VST3)
         shell: msys2 {0}
         run: scripts/build-windows.sh
+      - name: Build the C interface for the Python tests
+        shell: msys2 {0}
+        run: CXX=g++ scripts/build-capi.sh
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -95,7 +98,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install -r tests/requirements.txt
-          python tests/crosscheck.py build/windows/tests/cpp_reference.json
+          python tests/crosscheck.py build/windows/tests/cpp_reference.json build/windows/bin/HiddenValleyMC.vst3
           python tests/pb_load.py build/windows/bin/HiddenValleyMC.vst3
           python tests/readme_examples.py build/windows/bin/HiddenValleyMC.vst3
       - uses: actions/upload-artifact@v7

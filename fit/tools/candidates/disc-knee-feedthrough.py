@@ -1,18 +1,17 @@
 # SPDX-FileCopyrightText: 2026 Cameron Brooks
 # SPDX-License-Identifier: GPL-3.0-only
-"""Discrete stage, soft-ratio knee: direction (a), a feed-through around the storage node.
+"""Discrete stage, soft-ratio knee: direction (a), a feed-through around the storage node. RESULT: REFUTED (see the end).
 
 HYPOTHESIS. The storage node v cannot fall below its rest point (T - depth): on a steady sine below rest only the bleed acts, so
 every level below rest maps onto one node value and the gain computer reads one gain reduction, C_r(-depth). The reference's
 1.2:1, 2:1 and 3:1 curves keep falling smoothly to zero over the last 1-2 dB below that level (0.48 / 1.08 / 0.58 dB at the rest
-level; 4:1 and steeper are already at zero there), so the current pinned curves lose up to 1.1 dB around the knee. The candidate:
-the gain computer does not see the node alone but the node plus a small term from a second, UNCLAMPED envelope w of the rectified
-level (a branching one-pole in dB, attack taw, release trw toward the log level, no bleed to the reference), which does follow the
-level down. The node keeps its always-on bleed to the reference, so the release still targets the threshold reference and the
-steady table, bursts and DUAL items are produced by the node exactly as now.
+level; 4:1 and steeper are already at zero there). The candidate: the gain computer does not see the node alone but the node plus
+a small term from a second, UNCLAMPED envelope w of the rectified level (a branching one-pole in dB, attack taw, release trw toward
+the log level, no bleed to the reference), which does follow the level down. The node keeps its always-on bleed to the reference,
+so the release still targets the threshold reference and the steady table, bursts and DUAL items are produced by the node as now.
 
 VARIANTS (the gain computer's argument z, GR = C_r(z - T) with C_r resampled onto the z domain so the static family stays exact):
-  V0  z = v                                                   the current model, pinned curves (the control; reproduces stage 3)
+  V0  z = v                                                   the current model and constants (the control; reproduces stage 3)
   V1  z = (1 - alpha) v + alpha w                             a plain blend: the feed-through acts at every level
   V2  z = v + alpha * min(w - (rest - woff), 0)               the feed-through acts only below the reference (a diode from w
                                                               into the gain computer's node that conducts once w is below rest)
@@ -20,8 +19,6 @@ VARIANTS (the gain computer's argument z, GR = C_r(z - T) with C_r resampled ont
                                                               fade shape scaled by each ratio's value at rest (unpinned curves)
   V5  V2 with a fast follower (trw fixed 1 ms): the direct feed-through of the rectified level, ripple and all
   V6  z = v with a hard zero at rest (GR = 0 whenever v <= rest): the control the task describes, silence exact by construction.
-      (The current constants do NOT give that: the C++ reads the PCHIP at v - T = -depth, between the pinned grid point at -1
-      and the unpinned one at 0, and stands at +0.33 / +0.73 / +0.45 dB of gain reduction in silence at 1.2:1 / 2:1 / 3:1.)
   (max(v, w): analytically a no-op for the fade, since max(v, w) >= v = rest below rest, so GR >= C(-depth) there; not run.)
 
 FIT. Each variant is fitted in two passes on the full residual: (A) the mechanism constants alone with the detector at the current
@@ -30,20 +27,49 @@ log10 Sv). Residual = 3 x steady table (disc_ar_*, disc_al_*, disc_af_*: 54 cell
 (disc_burst_*, disc_bdepth_*, disc_dual_blen_*, disc_dual_pulses, weighted as stage 3) + the whole static grid (six ratios x 24
 thresholds x 25 levels = 3600 items, weight 1, evaluated through shift invariance from one fine x = L - T' grid per evaluation).
 The curves are the stage-3a shift family (fit_static, imported from fit/stages/stage3_discrete.py), resampled onto the z domain
-inside every residual evaluation, read with the C++ Fritsch-Carlson monotone cubic on the 1 dB grid.
+inside every residual evaluation, read with the C++ Fritsch-Carlson monotone cubic on the 1 dB grid. The mirror was checked
+against the C++ engine on the current constants: stage-3 report set 0.217 / 0.73 dB (C++ 0.216 / 0.73), standing gain reduction in
+silence per ratio 0.326 / 0.732 / 0.451 / 0.044 / 0.001 / 0.002 dB (C++ 0.326 / 0.731 / 0.451 / 0.044 / 0.002 / 0.002).
 
-REPORT per variant: static rms / max over the stage-3 report set (six ratios, thresholds 4 / 12 / 20, levels -30..0 step 3, full
-chain with ripple) and over the whole grid and the knee band; standing GR at silence per ratio; steady rms / max (54 cells);
-bursts weighted rms / max (30 non-DUAL disc_burst_* + 3 disc_bdepth_*); DUAL weighted rms / max (4 disc_dual_blen_* + pulses,
-stage 3's set) and the six disc_burst_*_Dual on their own; the fitted constants.
+RESULTS (2026-09-27; statics = full-chain rms / max in dB; bursts and DUAL weighted as stage 3):
+  - The current constants do NOT give exact silence at the soft ratios: the C++ reads the PCHIP at v - T = -depth = -0.40, between
+    the pinned grid point at -1 and the unpinned one at 0, and stands at +0.33 / +0.73 / +0.45 dB at 1.2:1 / 2:1 / 3:1 (4:1
+    +0.04). The whole 0.216 / 0.73 static figure is that standing value (the stage-3 report set, thresholds 4 / 12 / 20 at levels
+    -30 / -15 / 0, contains no point in the fade band at all: with a hard zero at rest it reads 0.018 / 0.04 while the knee band
+    x in [-4, 2] reads 0.226 / 1.21). Measure the knee on the knee band or the whole grid, not on that set.
+  - V2 (feed-through below rest) reproduces the statics to the shift family's floor with the dynamics untouched: pass A alpha
+    0.63, woff 0.24, taw -> 0.03 ms, trw -> 9.6 s (its 10 s bound): whole grid 0.024 / 0.18, knee band 0.035 / 0.16, report set
+    0.019 / 0.04, silence 0.000 at every ratio, steady 0.084 / 0.23, bursts 0.011 / 0.98, DUAL 0.018 / 0.09 (all three identical
+    to the current constants). Pass B (joint) keeps alpha 0.61 and moves the detector to depth 0.08, Sv 24, attack 1.39 ms:
+    steady 0.076 / 0.26, bursts 0.010 / 0.92, DUAL 0.010 / 0.07; the refit control (V6 with the static grid weighted 0, the
+    stage-3b residual alone) lands on the same detector (depth 0.077, Sv 24.5, steady 0.076, bursts 0.010, DUAL 0.010), so the
+    dynamic gains are the refit's, not the mechanism's.
+  - The follower must be slower than every release in the protocol: with trw held at 1 s / 3 s the DUAL items go to 0.168 /
+    0.117 rms at the scan optimum and the fit then removes the mechanism (alpha 0.012 / 0.016, statics back to 0.12 / 0.10).
+    V1 (plain blend) is removed by the fit the same way (alpha 0.019, statics 0.133 / 0.65; joint 0.056 / 0.50 at the price of
+    depth 0.63 / Sv 25), V5 (1 ms follower) too (alpha 0.006, statics 0.116 / 0.53). V4 (gate) works nearly as well as V2 with
+    the same slow follower (grid 0.028 / 0.30, knee 0.057 / 0.30: one common fade shape cannot do 3:1 and 1.2:1 at once).
+  - THE REFERENCE REFUTES THE SLOW FOLLOWER (python3 ... --reference-tail, black-box renders of the reference plug-in): after a
+    2 s burst at -10 dBFS (threshold 16, 1 ms, 0.5 s) into -50 dBFS its gain reduction at 2:1 is 5.27 / 1.00 / 0.082 / 0.050 /
+    0.001 dB at 0.5 / 1 / 2 / 4 / 8 s, on the same trajectory as 4:1 (5.67 / 1.07 / 0.084 / 0.050 / 0.001) and 1.2:1 (3.45 /
+    0.67 / 0.070 / 0.050 / 0.001); V2 predicts 0.94-1.25 dB standing until the follower crosses rest at about 10 s. A tone 1.5 dB
+    below the rest level (-39.5 dBFS) settles to its from-silence value within 2 s of such a burst (2:1: 0.266 dB; 1.2:1: 0.137),
+    where V2 predicts 0.94 / 0.42 dB for 10 s. So the reference's fade below the knee follows the level down at the release rate
+    with no memory, and every (a)-variant that follows the level that fast is removed by the 4:1 DUAL tails. Within (a) that is
+    a contradiction: below rest the argument must be <= v (max(v, w) gives no fade), a w that falls faster than v cuts the 4:1
+    DUAL tail, a w that falls slower than v cannot produce the measured tail. The knee needs the gain computer's argument to keep
+    falling below the 4:1 rest point at the release rate (1.6 dB below it by 2 s at 2:1), which is direction (b) or (c), not (a).
 
 usage: cd <repo> && python3 -u fit/tools/candidates/disc-knee-feedthrough.py [--variants 0,1,2,4,5,6] [--nfev-a 40] [--nfev-b 40]
-       [--skip-joint] [--scan] [--trw SECONDS]
+       [--skip-joint] [--scan] [--trw SECONDS] [--static-w W] [--eval JSON:variant:key] [--reference-tail]
   --scan   V2 / V4: a coarse grid over (alpha, woff) / (wd, woff) with the follower at 0.1 ms / 10 s before pass A (the resampling
            onto the 1 dB grid makes the static residual jagged in these constants and least_squares alone stalls near its start)
   --trw    hold the follower's release at this value (seconds) instead of fitting it: the sensitivity of the bursts to it
   --static-w W   weight of the static grid in the residual (0 = the stage-3b detector residual alone: the refit control)
   --eval JSON:variant:key   re-report a saved parameter vector (the runs write /tmp/disc-knee-feedthrough-<tag>.json)
+  --reference-tail   render the discriminating stimuli through the reference plug-in (needs the licensed plug-in and Pedalboard;
+           fit/measure/pa.py) and print its post-burst tail at 1.2:1 / 2:1 / 3:1 / 4:1 and the below-rest tone from silence and
+           after a burst; nothing is written
   (numba caches need a real file: never pipe this through stdin)"""
 import os, sys, time, json, numpy as np
 from numba import njit
@@ -420,8 +446,37 @@ def scan(h, p0):
     return best[1]
 
 
+def reference_tail():
+    """the discriminating measurement on the reference plug-in: does the gain reduction below the soft ratios' knee follow the level
+    down at the release rate (no memory), or does it stand for seconds after a burst as a slow follower would make it?"""
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "measure"))
+    import pa
+    p = pa.Ref(); print(f"reference {p.version} {p.sha256[:16]}")
+    S = dict(discrete_bypass="In", discrete_threshold=16, discrete_attack=1.0, discrete_recover="0.5 s")
+    def env(st, ratio):
+        y = p.run(protocol.stimulus(st, pa.FS), **pa.both(**S, discrete_ratio=ratio))
+        return GAIN12 - np.asarray(protocol.feature({"feat": {"type": "env"}, "stim": st}, y, pa.FS))
+    def at(gr, t_end, ts):
+        return [round(float(np.mean(gr[int((t_end + t) * 1000) - 50:int((t_end + t) * 1000)])), 3) for t in ts]
+    ts = (0.5, 1.0, 2.0, 4.0, 8.0, 12.0)
+    print("(i) burst -50 -> -10 (2 s) -> -50, thr 16, 1 ms / 0.5 s: reference GR (dB, 50-period mean) at 0.5/1/2/4/8/12 s after the burst end")
+    for r in ("1.2:1", "2:1", "3:1", "4:1"):
+        st = {"kind": "burst", "pre": -50, "level": -10, "pre_s": 0.5, "burst_s": 2.0, "post_s": 12.5, "f": 1000.0}
+        gr = env(st, r); print(f"   {r:>5}: {at(gr, 2.5, ts)}   (during the burst, last 50 periods: {round(float(np.mean(gr[2450:2500])), 3)})")
+    print("(ii) tone about 1.5 dB below the rest level at 2:1 and 1.2:1: from silence, and after a 2 s burst at -10")
+    for r in ("2:1", "1.2:1"):
+        for lvl in (-39.5, -40.5):
+            st = {"kind": "burst", "pre": -120, "level": lvl, "pre_s": 0.5, "burst_s": 12.5, "post_s": 0.1, "f": 1000.0}
+            a = at(env(st, r), 0.5, ts)
+            st2 = {"kind": "burst", "pre": lvl, "level": -10, "pre_s": 0.5, "burst_s": 2.0, "post_s": 12.5, "f": 1000.0}
+            b = at(env(st2, r), 2.5, ts)
+            print(f"   {r:>5} tone {lvl} dBFS: from silence {a} | after the burst {b}")
+
+
 def main():
     args = sys.argv[1:]
+    if "--reference-tail" in args:
+        reference_tail(); return
     trw_fixed = float(args[args.index("--trw") + 1]) if "--trw" in args else None
     static_w = float(args[args.index("--static-w") + 1]) if "--static-w" in args else 1.0
     ev = args[args.index("--eval") + 1] if "--eval" in args else None   # JSON:variant:key -> report that saved vector only

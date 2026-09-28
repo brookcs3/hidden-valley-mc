@@ -221,8 +221,16 @@ def resid(sh):
     return np.concatenate(out)
 
 
+def lp2q(f, fc, Q):
+    """analog second-order low pass magnitude, dB"""
+    w = f / fc
+    return -10.0 * np.log10((1 - w * w) ** 2 + (w / Q) ** 2)
+
+
 def harm_table(sh, label, verbose=True):
-    """H3/H5/H7 model - reference over the 27 items, by frequency; items with a reference below -100 dBc are excluded from the rms"""
+    """H3/H5/H7 model - reference over the 27 items, by frequency; items with a reference below -100 dBc are excluded from the rms.
+    r = o_vth / (A |LP(f)| v^) is the turn-on relative to the divider output amplitude the model settles at: the light of the plain
+    hard turn-on is the pulse train max(0, sin - r), whose 4f / 2f ratio nulls at r = 0.42 and whose 6f / 2f nulls at 0.28 and 0.75"""
     err = {f: {3: [], 5: [], 7: []} for f in (100, 1000, 4000)}; gerr = []; rows = []
     for iid, m in zip(HARM_IDS, HARM.feats(sh)):
         ref = F[iid]; f = int(ITEMS[iid]["stim"]["f"]); gerr.append(m["gain_db"] - ref["gain_db"])
@@ -232,7 +240,10 @@ def harm_table(sh, label, verbose=True):
             if a is None or b is None: cells.append("   n/a      "); continue
             cells.append(f"{a:6.1f}/{b:6.1f}")
             if b > -100.0: err[f][hk].append(a - b)
-        rows.append(f"   {iid:24s} gain {m['gain_db']:+6.2f}/{ref['gain_db']:+6.2f} | H3 {cells[0]} | H5 {cells[1]} | H7 {cells[2]}")
+        k = int(ITEMS[iid]["set"]["optical_threshold"]); lvl = ITEMS[iid]["stim"]["level"]
+        vhat = 10.0 ** ((lvl + m["gain_db"] - G0) / 20.0); lpm = 10.0 ** (lp2q(float(f), sh.fc, sh.Q) / 20.0)
+        rr = sh.vth / (sh.A(k) * lpm * vhat)
+        rows.append(f"   {iid:24s} gain {m['gain_db']:+6.2f}/{ref['gain_db']:+6.2f} | H3 {cells[0]} | H5 {cells[1]} | H7 {cells[2]} | r {rr:.2f}")
     if verbose:
         print(f"   harmonics under GR [{label}], model / ref dBc:"); print("\n".join(rows))
     summ = {}
@@ -321,12 +332,12 @@ def full_report(sh, label):
 # ------------------------------------------------------------------------------------------------ the fits
 # per variant: (parameters after dA and log10 tau_el) name, log10 lower, log10 upper, grid starts (log10)
 CANDS = {
-    "rc":      [("log10 tau", -5.0, -2.5, [-4.3, -4.0, -3.7, -3.4, -3.1])],
-    "peak":    [("log10 tau_rise", -6.3, -3.0, [-6.0, -5.0, -4.3]), ("log10 tau_fall", -4.7, -2.3, [-4.0, -3.5, -3.0])],
-    "rms":     [("log10 tau", -5.0, -2.5, [-4.3, -4.0, -3.7, -3.4, -3.1])],
+    "rc":      [("log10 tau", -5.0, -1.5, [-4.3, -4.0, -3.7, -3.4, -3.1, -2.5, -2.0])],
+    "peak":    [("log10 tau_rise", -6.3, -3.0, [-6.0, -5.0, -4.3]), ("log10 tau_fall", -4.7, -1.5, [-4.0, -3.5, -3.0, -2.3])],
+    "rms":     [("log10 tau", -5.0, -1.5, [-4.3, -4.0, -3.7, -3.4, -3.1, -2.5, -2.0])],
     "pre":     [("log10 tau", -5.5, -3.0, [-4.6, -4.0, -3.5])],
     "slew":    [("log10 tau_rise", -6.3, -3.0, [-6.0, -4.5]), ("log10 slew", 2.5, 5.5, [3.3, 3.8, 4.3, 4.8])],
-    "rclevel": [("log10 tau0", -5.0, -2.5, [-4.3, -3.7, -3.1]), ("kappa", -1.5, 1.5, [-1.0, 0.0, 1.0])],
+    "rclevel": [("log10 tau0", -5.0, -1.5, [-4.3, -3.7, -3.1, -2.5]), ("kappa", -1.5, 1.5, [-1.0, 0.0, 1.0])],
 }
 
 

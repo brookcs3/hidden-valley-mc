@@ -21,6 +21,8 @@ of tests/pb_reference.py: harmonics where the reference is above -80 dBc, even =
   sym     symmetric core, driver a2 x^2 + a3 x^3 only
   a2env   symmetric core, a2 (1 + k env): the even term grows with the signal envelope (the germanium Class-A form)
   classA  symmetric core, driver polynomial followed by an asymmetric soft ceiling (cp tanh(y / cp) above, cn below), before the core
+  caenv   symmetric core, the repo's own Class-A module (src/dsp/ClassA.hpp): a2 (1 + a2Env env), then the soft ceiling
+          y / (1 + |y/C|^8)^(1/8) with C = ceilDb above and ceilDb - asymDb below; a2Env, ceilDb, asymDb fitted
   dc      symmetric core, constant DC term in the driver output (Class-A standing current): flux offset = bias * phi_k
   dcenv   symmetric core, DC term that shifts with the envelope (self-biasing stage): bias0 + bias1 * env
   dcdec   symmetric core, standing bias that collapses with drive (operating point runs toward cutoff): bias0 / (1 + env / E0)
@@ -57,9 +59,9 @@ FREQS = [20, 30, 40, 60, 80, 120, 160, 320, 1000, 5000]
 LEVELS = list(range(-12, 25, 3))
 FIT_MAX_LEVEL = 21          # the +24 dBFS points hit the reference's output ceiling (tests: xfmr_ceiling), not modelled
 HARM_FLOOR = -80.0; MODEL_FLOOR = -120.0
-M_ASYM, M_SYM, M_A2ENV, M_CLASSA, M_DC, M_DCENV, M_DCDEC, M_ACDC, M_ACDEC, M_ACASYM = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+M_ASYM, M_SYM, M_A2ENV, M_CLASSA, M_DC, M_DCENV, M_DCDEC, M_ACDC, M_ACDEC, M_ACASYM, M_CAENV = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 MODES = {"asym": M_ASYM, "sym": M_SYM, "a2env": M_A2ENV, "classA": M_CLASSA, "dc": M_DC, "dcenv": M_DCENV, "dcdec": M_DCDEC,
-         "acdc": M_ACDC, "acdec": M_ACDEC, "acasym": M_ACASYM}
+         "acdc": M_ACDC, "acdec": M_ACDEC, "acasym": M_ACASYM, "caenv": M_CAENV}
 cal0 = load_cal()
 
 def getf(cal, name, k):
@@ -75,7 +77,7 @@ def sat(ph, phik, q):
 
 
 @njit(cache=True)
-def run_path(x, fs, g, a2, a3, r, phik, qp, qn, hs_g, hs_gain, hs_on, lp_g, lp_on, mode, p1, p2):
+def run_path(x, fs, g, a2, a3, r, phik, qp, qn, hs_g, hs_gain, hs_on, lp_g, lp_on, mode, p1, p2, p3):
     """x -> gain -> driver (mode) -> flux core (symmetric unless qp != qn) -> high shelf -> low pass. Returns y (float64)."""
     n = x.shape[0]
     y = np.empty(n)
@@ -83,12 +85,13 @@ def run_path(x, fs, g, a2, a3, r, phik, qp, qn, hs_g, hs_gain, hs_on, lp_g, lp_o
     phi = 0.0; sprev = 0.0; hs_s = 0.0; lp_s = 0.0; env = 0.0
     kEnv = 1.0 - np.exp(-1.0 / ((1.0 / (2.0 * np.pi * 5.0)) * fs))
     cp = 10.0 ** (p1 / 20.0); cn = 10.0 ** (p2 / 20.0); e0 = 10.0 ** (p2 / 20.0)
+    cpa = 10.0 ** (p2 / 20.0); cna = cpa * 10.0 ** (-p3 / 20.0)   # caenv: the ClassA.hpp ceiling per polarity (ceilDb, asymDb)
     kdc = np.pi * np.pi / 8.0   # <u^2> = A^2 / 2 with A = pi env / 2 for a sine
     for i in range(n):
         u = g * x[i]
         env += (abs(u) - env) * kEnv
         a2e = a2
-        if mode == 2:
+        if mode == 2 or mode == 10:
             a2e = a2 * (1.0 + p1 * env)
         v = u + a2e * u * u + a3 * u * u * u
         if mode == 3:
@@ -96,6 +99,10 @@ def run_path(x, fs, g, a2, a3, r, phik, qp, qn, hs_g, hs_gain, hs_on, lp_g, lp_o
                 v = cp * np.tanh(v / cp)
             else:
                 v = -cn * np.tanh(-v / cn)
+        elif mode == 10:
+            # src/dsp/ClassA.hpp: y / (1 + |y / C|^8)^(1/8), C = cp above, cp 10^(-asymDb/20) below
+            C = cpa if v > 0.0 else cna
+            v = v / (1.0 + abs(v / C) ** 8.0) ** 0.125
         elif mode == 4:
             v += p1 * r * phik
         elif mode == 5:
@@ -134,7 +141,7 @@ class Path:
         self.a2 = getf(cal, "x_a2", k); self.a3 = getf(cal, "x_a3", k); self.sat_db = getf(cal, "x_sat_db", k)
         self.q = getf(cal, "x_q", k); self.asym = getf(cal, "x_asym", k)
 
-    def render(self, x, fs, mode, p1=0.0, p2=0.0, a2=None, a3=None, sat_db=None, q=None, asym=None):
+    def render(self, x, fs, mode, p1=0.0, p2=0.0, p3=0.0, a2=None, a3=None, sat_db=None, q=None, asym=None):
         a2 = self.a2 if a2 is None else a2; a3 = self.a3 if a3 is None else a3
         sat_db = self.sat_db if sat_db is None else sat_db; q = self.q if q is None else q
         asym = (self.asym if asym is None else asym) if mode in (M_ASYM, M_ACASYM) else 0.0
@@ -144,7 +151,7 @@ class Path:
         hs_on = self.hs_hz > 0; hs_g = np.tan(np.pi * min(self.hs_hz, 0.49 * fs) / fs) if hs_on else 0.0
         lp_on = self.lp_hz > 0; lp_g = np.tan(np.pi * min(self.lp_hz, 0.49 * fs) / fs) if lp_on else 0.0
         return run_path(np.asarray(x, dtype=np.float64), float(fs), g, a2, a3, r, phik, qp, qn, hs_g, 10 ** (self.hs_db / 20), hs_on,
-                        lp_g, lp_on, mode, float(p1), float(p2))
+                        lp_g, lp_on, mode, float(p1), float(p2), float(p3))
 
 
 def grid_items(core, max_level=FIT_MAX_LEVEL):
@@ -278,6 +285,24 @@ def offset_map():
                     else: hi = mid
                 row.append(f"{100 * np.sqrt(lo * hi):6.3f}%@{lg:+3d}")
             print(f"  {ex:+3d}    | " + " ".join(f"{r:>15s}" for r in row))
+        # the decisive test of any driver-side (level-only) law: at ONE level the driver sees the same signal at every frequency, so
+        # a DC, envelope or ceiling mechanism delivers one flux offset per level; the reference needs a different one per frequency
+        print(f"  {core}: required offset at EQUAL LEVEL across frequency (a level-only mechanism gives one value per row)")
+        for lg in (9, 12, 15, 18, 21):
+            row = []
+            for f in freqs:
+                if lg - onset(f) < -3.5:
+                    row.append("."); continue
+                ref = F[f"xf_{core}_f{f}_{lg}"]["h"][0]; zero = h2(f, lg, 0.0)
+                if zero >= ref:
+                    row.append("<0"); continue
+                lo, hi = 1e-5, 0.3
+                for _ in range(16):
+                    mid = np.sqrt(lo * hi)
+                    if h2(f, lg, mid) < ref: lo = mid
+                    else: hi = mid
+                row.append(f"{100 * np.sqrt(lo * hi):6.3f}%")
+            print(f"  {lg:+3d} dBFS | " + " ".join(f"{r:>15s}" for r in row))
 
 
 # ------------------------------------------------------------------------------------------------ fitting
@@ -293,16 +318,19 @@ PARAMS = {
     "acdc":   (["a2", "a3", "sat_db", "q", "p1"], [-5e-3, -5e-2, -6.0, 1.5, -0.3], [5e-3, 5e-2, 12.0, 30.0, 0.3], [1e-5, 1e-4, 0.5, 1.0, 1e-3]),
     "acdec":  (["a2", "a3", "sat_db", "q", "p1", "p2"], [-5e-3, -5e-2, -6.0, 1.5, -0.3, -20.0], [5e-3, 5e-2, 12.0, 30.0, 0.3, 40.0], [1e-5, 1e-4, 0.5, 1.0, 1e-3, 1.0]),
     "acasym": (["a2", "a3", "sat_db", "q", "asym"], [-5e-3, -5e-2, -6.0, 1.5, -0.5], [5e-3, 5e-2, 12.0, 30.0, 0.5], [1e-5, 1e-4, 0.5, 1.0, 0.01]),
+    "caenv":  (["a2", "a3", "sat_db", "q", "p1", "p2", "p3"], [-5e-3, -5e-2, -6.0, 1.5, -0.5, 6.0, -6.0], [5e-3, 5e-2, 12.0, 30.0, 20.0, 60.0, 6.0],
+               [1e-5, 1e-4, 0.5, 1.0, 0.1, 1.0, 0.1]),
 }
 STARTS = {"a2env": [[0.5], [3.0]], "classA": [[30.0, 24.0], [40.0, 30.0]], "dc": [[0.01], [-0.01]], "dcenv": [[0.01, -0.001], [0.01, 0.001]],
-          "dcdec": [[0.01, 6.0], [0.02, 0.0]], "acdc": [[0.01], [-0.01]], "acdec": [[0.01, 6.0], [0.02, 0.0]]}
+          "dcdec": [[0.01, 6.0], [0.02, 0.0]], "acdc": [[0.01], [-0.01]], "acdec": [[0.01, 6.0], [0.02, 0.0]],
+          "caenv": [[3.0, 24.0, 1.0], [0.5, 30.0, 3.0]]}
 
 
 def fit_candidate(core, k, cand, nfev, verbose=False):
     path = Path(cal0, k); mode = MODES[cand]
     names, lo, hi, xs = PARAMS[cand]
     items = grid_items(core)
-    base = {"a2": path.a2, "a3": path.a3, "sat_db": path.sat_db, "q": path.q, "asym": path.asym, "p1": 0.0, "p2": 0.0}
+    base = {"a2": path.a2, "a3": path.a3, "sat_db": path.sat_db, "q": path.q, "asym": path.asym, "p1": 0.0, "p2": 0.0, "p3": 0.0}
 
     def resid(pv):
         p = dict(zip(names, pv))
@@ -351,7 +379,7 @@ def main():
                 return a.split("=", 1)[1]
         return default
     cores = opt("cores", "Nickel,Iron,Steel").split(",")
-    cands = opt("cands", "asym,sym,a2env,classA,dc,dcenv,dcdec,acdc,acdec,acasym").split(",")
+    cands = opt("cands", "asym,sym,a2env,classA,caenv,dc,dcenv,dcdec,acdc,acdec,acasym").split(",")
     nfev = int(opt("nfev", "60"))
     if "--extract" in args or len(args) == 0:
         extract()

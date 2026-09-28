@@ -34,12 +34,12 @@ import hvmc_pb, protocol  # noqa: E402
 TOL = {
     # rms / max in dB per group and kind, set from the fitted model's achieved figures on the full protocol (2026-09-27, stages 1-5 final)
     # with about 1.5x margin on rms and 1.3x on max; a change that pushes a group past these is a regression, not noise.
-    "law":           {"gain": (0.05, 0.08)},
+    "law":           {"gain": (0.01, 0.02)},
     "opto_static":   {"gain": (0.12, 0.45)},
     "opto_static_f": {"gain": (0.45, 1.70)},                          # 8 kHz above +4 dBFS: the reference's own HF ceiling (docs/opto-fix.md 6.5)
     "opto_dyn":      {"env": (0.12, 1.20)},                           # max: the first 20 ms of a below-knee release (docs/opto-fix.md 6.3)
     "opto_harm":     {"gain": (0.25, 0.70), "odd": (3.5, 8.0), "even": (15.0, 35.0)},   # odd: H3 within about 2 dB, H5 within 5 (an open item)
-    "disc_static":   {"gain": (0.32, 0.85)},                          # rms and max: the soft ratios' last dB below the knee, an open item (docs/disc-knee-fix.md)
+    "disc_static":   {"gain": (0.10, 1.20)},                          # max: the soft ratios' last dB below the knee, an open item (docs/disc-knee-fix.md)
     "disc_ar":       {"gain": (0.16, 0.50)},
     "disc_dyn":      {"env": (0.20, 7.50)},                           # max: one period at the onset of the 0 dBFS burst (docs/detector-fix.md 5.1)
     "disc_harm":     {"gain": (0.12, 0.25), "odd": (1.5, 2.5), "even": (1.0, 1.5)},

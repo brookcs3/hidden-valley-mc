@@ -134,7 +134,7 @@ public:
             const double t = double(fadePos++) / fadeLen, wf = 0.5 - 0.5 * std::cos(kPi * t);
             g = curves[prevRatio].at(x) * (1.0 - wf) + g * wf;
         }
-        if (g < 0.0) g = 0.0;
+        if (g < 0.0 || v <= rest) g = 0.0;   // at or below the rest point the stage does nothing: exact silence at every ratio
         gr = g;
         // gain cell
         const double a2 = (cfg.hwUnit ? c[kc_d_hwunit_a2] : c[kc_d_a2]) * cfg.a2Scale + cfg.a2Extra * (g * 0.1);

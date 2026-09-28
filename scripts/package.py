@@ -7,14 +7,14 @@ Each zip unpacks to HiddenValleyMC.vst3/ holding Contents/<arch>-linux/HiddenVal
 and THIRD_PARTY_NOTICES.md (the notices that the licences of the bundled third-party code ask binary copies to carry). Unzipping into
 ~/.vst3 installs it; unzipping both architectures there gives one bundle for both.
 Entries are sorted and time-stamped from SOURCE_DATE_EPOCH (else the newest input file), so the same inputs give the same zip.
-The version comes from getVersion() in src/PluginHiddenValleyMC.cpp.
+The version comes from getVersion() in src/PluginHVMC.cpp.
 usage: python3 scripts/package.py [bundle dir] [dist dir]   (defaults: build/bin/HiddenValleyMC.vst3, dist/)"""
 import hashlib, os, re, stat, sys, time, zipfile
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 NAME = "HiddenValleyMC"
 bundle = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(ROOT, "build", "bin", NAME + ".vst3")
 dist = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.path.join(ROOT, "dist")
-m = re.search(r"d_version\((\d+),\s*(\d+),\s*(\d+)\)", open(os.path.join(ROOT, "src", "PluginHiddenValleyMC.cpp")).read())
+m = re.search(r"d_version\((\d+),\s*(\d+),\s*(\d+)\)", open(os.path.join(ROOT, "src", "PluginHVMC.cpp")).read())
 version = ".".join(m.groups())
 contents = os.path.join(bundle, "Contents")
 arches = sorted(d[:-len("-linux")] for d in os.listdir(contents) if d.endswith("-linux") and os.path.isdir(os.path.join(contents, d)))

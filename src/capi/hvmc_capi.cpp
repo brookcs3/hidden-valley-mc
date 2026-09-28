@@ -43,8 +43,18 @@ int hvmc_num_input_params() { return kNumInputParams; }
 int hvmc_num_params() { return kNumParams; }
 int hvmc_param_steps(int index) { return paramSteps(index); }
 int hvmc_param_default(int index) { return paramDefault(index); }
-void hvmc_param_name(int index, char* out, int cap) { paramName(index, out, cap); }
-void hvmc_param_label(int index, int value, char* out, int cap) { positionLabel(index, value, out, cap); }
-const char* hvmc_param_description(int index) { return paramDescription(index); }
+void hvmc_param_name(int index, char* out, int cap)
+{
+    if (index < 0 || index >= kNumParams || cap <= 0) { if (cap > 0) out[0] = 0; return; }
+    paramName(index, out, cap);
+}
+void hvmc_param_label(int index, int value, char* out, int cap)
+{
+    if (index < 0 || index >= kNumInputParams || value < 0 || value >= paramSteps(index) || cap <= 0) { if (cap > 0) out[0] = 0; return; }
+    positionLabel(index, value, out, cap);
+}
+const char* hvmc_param_description(int index) { return (index < 0 || index >= kNumParams) ? "" : paramDescription(index); }
+// the gain computer's curve grid (shared with the fitter, which must not hard-code it)
+void hvmc_curve_grid(int* n, double* x0, double* dx) { *n = kCurveN; *x0 = kCurveX0; *dx = kCurveDx; }
 
 }

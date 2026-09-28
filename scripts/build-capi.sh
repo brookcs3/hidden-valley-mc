@@ -8,6 +8,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$ROOT/build/capi"
 CXX="${CXX:-c++}"
-case "$(uname -s)" in Darwin) EXT=dylib ;; *) EXT=so ;; esac
-"$CXX" -std=gnu++17 -O2 -fno-fast-math -Wall -Wextra -shared -fPIC -I"$ROOT/src" -o "$ROOT/build/capi/libhvmc.$EXT" "$ROOT/src/capi/hvmc_capi.cpp"
-echo "== built build/capi/libhvmc.$EXT"
+case "$(uname -s)" in Darwin) EXT=dylib; PREFIX=lib ;; MINGW*|MSYS*|CYGWIN*) EXT=dll; PREFIX= ;; *) EXT=so; PREFIX=lib ;; esac
+"$CXX" -std=gnu++17 -O2 -fno-fast-math -Wall -Wextra -shared -fPIC -I"$ROOT/src" -o "$ROOT/build/capi/${PREFIX}hvmc.$EXT" "$ROOT/src/capi/hvmc_capi.cpp"
+echo "== built build/capi/${PREFIX}hvmc.$EXT"

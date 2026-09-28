@@ -2,7 +2,7 @@ Local change to DPF (commit 4238e1c7f0351bbe488d79f0899c540543ac7583) for the ma
 scripts/build-macos.sh applies it to a copy of DPF in build/macos/DPF; third_party/DPF stays exactly as cloned. It touches only the
 AU wrapper, distrho/src/DistrhoPluginAU.cpp, which neither the Linux nor the VST3 build compiles.
 DPF's AU wrapper does not publish parameter value names (its own TODO: "scale points to kAudioUnitParameterFlag_ValuesHaveStrings"),
-so AU hosts would show position numbers (0 to 10) where the VST3 shows the panel legends (22 to 1000 Hz, BOOST / OUT / CUT, ...).
+so AU hosts would show position numbers (0 to 23) where the VST3 shows the panel legends (1 to 24, 1.2:1 / 2:1 / FLOOD, NICKEL / IRON / STEEL, ...).
 This sets kAudioUnitParameterFlag_ValuesHaveStrings on parameters with enumeration values and answers
 kAudioUnitProperty_ParameterValueStrings (indexed parameters), kAudioUnitProperty_ParameterStringFromValue and
 kAudioUnitProperty_ParameterValueFromString from those values.

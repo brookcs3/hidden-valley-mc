@@ -23,6 +23,10 @@ items; plus the full 6 x 24 x 25 static grid with the curves refitted in the TRU
               rest - D is what discharges the node below rest. Above rest this is exactly the current node; below rest the node
               tracks a quiet signal down to rest - D, and rests at rest - D in silence.
       mode 5  mode 4 with the leak's time constant fixed in seconds.
+  (b') mode 6 added after the runs above refuted (c) on the burst onsets: the node stays at rest, but the release reference and the
+              curve's origin move together with the RATIO switch, T_r = T + off_r (off = 0 at 4:1, 6:1 and FLOOD; fitted, or given
+              with --off, for 1.2:1, 2:1 and 3:1). Every dynamic item is at 4:1, so the dynamics are mode 0's by construction; on the
+              statics the node tracks a quiet signal down to the soft ratio's own rest point, which is where its curve is pinned.
 Every mode starts from the current constants; the curves are never taken from constants.json but refitted (isotonic regression in
 the node domain, pinned to zero at the silence node; the threshold convention is shifted so that the silence node sits exactly on
 a knot of the 1 dB curve grid, so that the C++ PCHIP is exactly zero there).
@@ -30,7 +34,9 @@ Reported per mode: rendered statics through the mirror (exact ripple, lock-in ga
 4, 12, 20 x levels -30, -15, 0) and on the fuller set (levels -30..0 step 3), the standing gain reduction at silence per ratio, the
 steady-state table, the bursts and the DUAL items, against the current best (statics 0.216 / 0.73, steady ~0.1, bursts ~0.01, DUAL 0.011).
 The mirror is checked against the C++ engine on the baseline first.
-usage: cd <repo> && python3 -u fit/tools/candidates/disc-knee-second-bleed.py [--modes 0,1,2,3,4,5] [--nfev 40] [--no-cpp]"""
+usage: cd <repo> && python3 -u fit/tools/candidates/disc-knee-second-bleed.py [--modes 0,1,2,3,4,5,6] [--nfev 40] [--no-cpp] [--fix D,lam] [--off a,b,c]
+       --fix holds the leak's D (dB) and lam (or tg in seconds for modes 2 and 5) and fits only the sixteen stage-3 constants; the
+       free fit walks D to its bound rather than lam to infinity, so the corner (D >= 2.2, lam large) has to be evaluated by hand."""
 import os, sys, time, numpy as np
 from numba import njit, prange
 from scipy.optimize import least_squares
@@ -51,7 +57,9 @@ NAMES = {0: "(d) current node, curves refitted in the true node domain",
          2: "(c) two-way bleed to rest + slow leak to rest - D, fixed tg",
          3: "(c) two-way bleed to rest + leak to the log floor (GERMANIUM hook), kL = kR / lam",
          4: "(c) one-way bleed to rest (diode) + slow leak to rest - D, kL = kR / lam",
-         5: "(c) one-way bleed to rest (diode) + slow leak to rest - D, fixed tg"}
+         5: "(c) one-way bleed to rest (diode) + slow leak to rest - D, fixed tg",
+         6: "(b') node at rest; the release reference and the curve origin move with the ratio switch, T_r = T + off_r"}
+OFF0 = np.zeros(6)
 
 
 # ------------------------------------------------------------------------------------------------ the curve, as the C++ evaluates it
@@ -106,7 +114,7 @@ def node(a, fs, ta, tr, dual, t2, c2, Tk, depth, sv, mode, D, lam):
     k2 = (1.0 - np.exp(-1.0 / (t2 * fs))) if dual else 0.0
     fl = 10.0 ** (FLOOR / 20.0)
     rest = Tk - depth
-    kL, tgt, oneway, vs = leak_coefs(mode, fs, tr, lam, kR, rest, D)
+    kL, tgt, oneway, vs = leak_coefs(0 if mode == 6 else mode, fs, tr, lam, kR, rest, D)
     x = vs; w = vs
     for i in range(n):
         e = 20.0 * np.log10(a[i]) if a[i] > fl else FLOOR
@@ -187,7 +195,7 @@ def node_map(pd, mode):
 def silence_node(pd, mode):
     ta, tr, t2, c2, depth, sv, D, lam = pd
     kR = 1.0 - np.exp(-1.0 / (tr[2] * FS))
-    return leak_coefs(mode, float(FS), tr[2], lam, kR, -depth, D)[3]   # relative to T
+    return leak_coefs(0 if mode == 6 else mode, float(FS), tr[2], lam, kR, -depth, D)[3]   # relative to T
 
 
 class Static:
@@ -196,11 +204,12 @@ class Static:
         self.ri, self.ki, self.L, self.G = static_setup(Tp)
         self.y0 = -20.0 - Tp[15]   # the stage-3 convention for d0: level -20 dBFS at threshold 16
 
-    def fit(self, pd, mode):
-        """curves refitted in the node domain: returns residual (3600), node-domain x per point, fitted values, d0, x_sil"""
+    def fit(self, pd, mode, off=OFF0):
+        """curves refitted in the node domain: returns residual (3600), node-domain x per point, fitted values, d0, x_sil.
+        off: per-ratio shift of the reference (mode 6); each ratio's node domain is relative to its own T + off_r"""
         g = node_map(pd, mode)
         d0 = float(np.interp(self.y0, YS, g) - self.y0)
-        y = self.L - self.Tp[self.ki] - d0
+        y = self.L - self.Tp[self.ki] - d0 - off[self.ri]
         xn = np.interp(y, YS, g)
         xs = silence_node(pd, mode)
         fit = np.empty_like(self.G); curves_pts = []
@@ -293,11 +302,17 @@ def burst_split(res):
 # ------------------------------------------------------------------------------------------------ parameters
 def unpack(p, mode):
     ta = list(p[0:6]); tr = list(p[6:12]); t2 = float(p[12]); c2 = float(p[13]); depth = float(p[14]); sv = float(10.0 ** p[15])
-    if mode == 0:
+    if mode == 0 or mode == 6:
         D, lam = 0.0, 1.0
     else:
         D = float(p[16]); lam = float(10.0 ** p[17])
     return ta, tr, t2, c2, depth, sv, D, lam
+
+
+def off_of(p, mode):
+    off = np.zeros(6)
+    if mode == 6: off[:3] = p[16:19]
+    return off
 
 
 def start_and_bounds(mode):
@@ -309,6 +324,8 @@ def start_and_bounds(mode):
         p0 += [3.0, np.log10(30.0)]; lo += [0.3, 0.0]; hi += [40.0, 3.5]; xs += [1.0, 0.3]
     elif mode in (2, 5):
         p0 += [3.0, np.log10(3.0)]; lo += [0.3, -1.5]; hi += [40.0, 1.5]; xs += [1.0, 0.3]
+    elif mode == 6:
+        p0 += [-2.2, -2.2, -1.0]; lo += [-6.0] * 3; hi += [0.0] * 3; xs += [0.5] * 3
     return np.clip(p0, lo, hi), lo, hi, xs
 
 
@@ -318,10 +335,10 @@ REPORT198 = [(r, k, L) for r in range(6) for k in (4, 12, 20) for L in range(-30
 FULL = [(r, k, L) for r in range(6) for k in range(1, 25) for L in LEVELS]
 
 
-def rendered_static(items, C, S, Tfin, depth_fin, pd, mode):
+def rendered_static(items, C, S, Tfin, depth_fin, pd, mode, off=OFF0):
     """mirror render of static items: gain through the node + PCHIP curve with the exact ripple; returns model - reference (dB)"""
     ta, tr, t2, c2, _, sv, D, lam = pd
-    lv = np.array([float(L) for _, _, L in items]); Tk = np.array([Tfin[k - 1] for _, k, _ in items]); ri = np.array([r for r, _, _ in items], dtype=np.int64)
+    lv = np.array([float(L) for _, _, L in items]); Tk = np.array([Tfin[k - 1] + off[r] for r, k, _ in items]); ri = np.array([r for r, _, _ in items], dtype=np.int64)
     m = len(items)
     g, _ = sine_grid(lv, np.full(m, 1000.0), np.full(m, ta[2]), np.full(m, tr[2]), Tk, ri, C, S, float(FS), depth_fin, sv, mode, D, lam, 2.5, 0.5)
     ref = np.array([F[f"disc_static_{RATIOS[r]}_t{k}_{L}"] for r, k, L in items])
@@ -333,32 +350,32 @@ def rms_max(e):
 
 
 def report(mode, p, Tp, curves_L, st, label, cpp=False):
-    pd = unpack(p, mode); ta, tr, t2, c2, depth, sv, D, lam = pd
-    sres, xn, fit, d0, xs, cpts = st.fit(pd, mode)
+    pd = unpack(p, mode); ta, tr, t2, c2, depth, sv, D, lam = pd; off = off_of(p, mode)
+    sres, xn, fit, d0, xs, cpts = st.fit(pd, mode, off)
     # convention shift: put the silence node on a knot
     ks = int(round(xs)); delta = xs - ks
     Tfin = Tp + d0 + delta; depth_fin = depth + delta
     C, S = curves_on_grid(cpts, xs, delta)
     print(f"  {label}: attack ms {np.round(np.array(ta) * 1e3, 3).tolist()} recover s {np.round(tr, 4).tolist()} t2 {t2:.4f} c2 {c2:.2f} depth {depth:.3f} Sv {sv:.2f}"
-          + (f" D {D:.3f} dB {'tg' if mode in (2, 5) else 'lam'} {lam:.3f}" if mode else ""))
+          + (f" off {np.round(off[:3], 3).tolist()}" if mode == 6 else f" D {D:.3f} dB {'tg' if mode in (2, 5) else 'lam'} {lam:.3f}" if mode else ""))
     print(f"    d0 {d0:+.3f} dB; silence node {xs:+.3f} dB below T (stage-3 convention); convention shift {delta:+.3f} -> rest at {-depth_fin:+.3f}, silence knot {ks:+d}")
     rest_rel = d0 - depth   # rest relative to Tp, in the level domain (T = Tp + d0, rest = T - depth)
-    band = st.L - st.Tp[st.ki] - rest_rel
+    band = st.L - st.Tp[st.ki] - rest_rel   # relative to the 4:1 rest, so the bands are comparable across modes
     sel = st.G > 0.3
     print(f"    node-domain static family: rms {rms_max(sres)[0]:.3f} max {rms_max(sres)[1]:.2f} over all 3600 | compressing (>0.3 dB) rms {rms_max(sres[sel])[0]:.3f} max {rms_max(sres[sel])[1]:.2f}")
     for lo_, hi_, nm in ((-99, -2.5, "L < rest - 2.5"), (-2.5, 0.0, "rest - 2.5 <= L <= rest"), (0.0, 3.0, "rest < L <= rest + 3"), (3.0, 99, "L > rest + 3")):
         m = (band > lo_) & (band <= hi_)
         per = " ".join(f"{RATIOS[r]} {rms_max(sres[m & (st.ri == r)])[1]:.2f}" for r in range(6))
         print(f"      band {nm:24s}: rms {rms_max(sres[m])[0]:.3f} max {rms_max(sres[m])[1]:.2f} | max per ratio: {per}")
-    e54 = rendered_static(REPORT54, C, S, Tfin, depth_fin, pd, mode); e198 = rendered_static(REPORT198, C, S, Tfin, depth_fin, pd, mode)
-    efull = rendered_static(FULL, C, S, Tfin, depth_fin, pd, mode)
+    e54 = rendered_static(REPORT54, C, S, Tfin, depth_fin, pd, mode, off); e198 = rendered_static(REPORT198, C, S, Tfin, depth_fin, pd, mode, off)
+    efull = rendered_static(FULL, C, S, Tfin, depth_fin, pd, mode, off)
     print(f"    RENDERED statics (mirror, exact ripple, PCHIP): 54-item set rms {rms_max(e54)[0]:.3f} max {rms_max(e54)[1]:.2f} | 198-item set rms {rms_max(e198)[0]:.3f} max {rms_max(e198)[1]:.2f} | full grid rms {rms_max(efull)[0]:.3f} max {rms_max(efull)[1]:.2f}")
     fr = np.array([r for r, _, _ in FULL])
     print("      full-grid rms per ratio:", " ".join(f"{RATIOS[r]} {rms_max(efull[fr == r])[0]:.3f}/{rms_max(efull[fr == r])[1]:.2f}" for r in range(6)))
     sil = [float(pchip_at(C[r], S[r], float(ks))) for r in range(6)]
     # the true silence check: a -50 dBFS sine at threshold 1 (as law_disc_gain_*), every ratio
     m = 6
-    gs, _ = sine_grid(np.full(m, -50.0), np.full(m, 1000.0), np.full(m, ta[2]), np.full(m, tr[2]), np.full(m, Tfin[0]), np.arange(6, dtype=np.int64), C, S, float(FS), depth_fin, sv, mode, D, lam, 2.0, 0.5)
+    gs, _ = sine_grid(np.full(m, -50.0), np.full(m, 1000.0), np.full(m, ta[2]), np.full(m, tr[2]), Tfin[0] + off, np.arange(6, dtype=np.int64), C, S, float(FS), depth_fin, sv, mode, D, lam, 2.0, 0.5)
     print(f"    standing GR at silence per ratio (curve at the silence knot): {np.round(sil, 4).tolist()} | rendered -50 dBFS at threshold 1: {np.round(-gs, 4).tolist()}")
     dres = dyn_resid(curves_L, Tp, pd, mode, d0)
     ss = dres[:54] / 3.0; (brms, bmax), (drms, dmax) = burst_split(dres)
@@ -372,13 +389,23 @@ def report(mode, p, Tp, curves_L, st, label, cpp=False):
     e = env_of_item("disc_burst_1.0_0.5 s", curves_L, Tp, pd, mode, d0); ref = np.asarray(F["disc_burst_1.0_0.5 s"]); n = min(len(e), len(ref))
     tail = [(j, round(float(e[j]), 2), round(float(ref[j]), 2)) for j in (2600, 2800, 3000, 3300, 3600, 4000) if j < n]
     print("      burst 1 ms / 0.5 s release tail (period, model, ref):", tail)
-    if cpp:
-        cal2 = cal.copy()
-        cal2[MODEL.field("d_thr_db")] = Tfin; cal2[MODEL.field("d_curve")] = C.reshape(-1); cal2[MODEL.field("d_tatt")] = ta; cal2[MODEL.field("d_trel")] = tr
-        cal2[MODEL.field("d_dual_t2")] = t2; cal2[MODEL.field("d_dual_c2")] = c2; cal2[MODEL.field("d_rel_depth_db")] = depth_fin; cal2[MODEL.field("d_att_sv_db")] = sv
-        cal2[MODEL.field("d_goff_db")] = 0.0
-        ec = np.array([render_item(ITEMS[f"disc_static_{RATIOS[r]}_t{k}_{L}"], cal2) - F[f"disc_static_{RATIOS[r]}_t{k}_{L}"] for r, k, L in REPORT54])
-        print(f"    C++ engine on the same constants (mode 0 only is faithful): 54-item rms {rms_max(ec)[0]:.3f} max {rms_max(ec)[1]:.2f}; mirror - C++ max |diff| {np.max(np.abs(e54 - ec)):.4f} dB")
+    if cpp and mode in (0, 6):
+        # the C++ engine on these constants. Mode 6's per-ratio reference is emulated without a code change: every item runs one
+        # ratio, so the whole threshold table is shifted by that ratio's offset for its render (exactly what a d_ratio_off field would do)
+        def cal_for(r):
+            cal2 = cal.copy()
+            cal2[MODEL.field("d_thr_db")] = Tfin + off[r]; cal2[MODEL.field("d_curve")] = C.reshape(-1); cal2[MODEL.field("d_tatt")] = ta; cal2[MODEL.field("d_trel")] = tr
+            cal2[MODEL.field("d_dual_t2")] = t2; cal2[MODEL.field("d_dual_c2")] = c2; cal2[MODEL.field("d_rel_depth_db")] = depth_fin; cal2[MODEL.field("d_att_sv_db")] = sv
+            return cal2
+        cals = [cal_for(r) for r in range(6)]
+        for nm, items, em in (("54-item", REPORT54, e54), ("198-item", REPORT198, e198)):
+            ec = np.array([render_item(ITEMS[f"disc_static_{RATIOS[r]}_t{k}_{L}"], cals[r]) - F[f"disc_static_{RATIOS[r]}_t{k}_{L}"] for r, k, L in items])
+            print(f"    C++ ENGINE on these constants, {nm} set: rms {rms_max(ec)[0]:.3f} max {rms_max(ec)[1]:.2f}; mirror - C++ max |diff| {np.max(np.abs(em - ec)):.4f} dB")
+        ec = np.array([render_item(ITEMS[f"disc_static_{RATIOS[r]}_t12_-60"], cals[r]) - F[f"disc_static_{RATIOS[r]}_t12_-60"] for r in range(6)])
+        print(f"    C++ ENGINE standing GR at silence (disc_static_*_t12_-60, model - reference gain, dB): {np.round(-ec, 4).tolist()}")
+        for iid in ("disc_burst_1.0_0.5 s", "disc_burst_30.0_0.1 s", "disc_burst_1.0_Dual", "disc_dual_blen_0.1", "law_disc_gain_12"):
+            e = render_item(ITEMS[iid], cals[3]); ref = np.asarray(F[iid]); d = np.atleast_1d(np.asarray(e) - ref)
+            print(f"      C++ {iid}: rms {rms_max(d)[0]:.3f} max {rms_max(d)[1]:.2f}")
     sys.stdout.flush()
     return dict(mode=mode, p=p, C=C, Tfin=Tfin, depth_fin=depth_fin, e54=rms_max(e54), e198=rms_max(e198), efull=rms_max(efull), sil=sil, steady=rms_max(ss), bursts=(brms, bmax), dual=(drms, dmax))
 
@@ -407,6 +434,8 @@ def main():
     modes = [int(m) for m in args[args.index("--modes") + 1].split(",")] if "--modes" in args else [0, 1, 2, 3, 4, 5]
     nfev = int(args[args.index("--nfev") + 1]) if "--nfev" in args else 40
     w_static = float(args[args.index("--wstatic") + 1]) if "--wstatic" in args else 1.0
+    fix = [float(t) for t in args[args.index("--fix") + 1].split(",")] if "--fix" in args else None
+    off_given = [float(t) for t in args[args.index("--off") + 1].split(",")] if "--off" in args else None
     print(f"GAIN12 {GAIN12:.4f}; reference GR at -50 dBFS, threshold 1, gain 12: {GAIN12 - F['law_disc_gain_12']:+.4f} dB")
     Tp, curves_L = S3.fit_static()
     st = Static(Tp)
@@ -416,18 +445,28 @@ def main():
     for mode in modes:
         print(f"\nMODE {mode}: {NAMES[mode]}")
         p0, lo, hi, xs = start_and_bounds(mode)
+        tail = np.array([])
+        if fix is not None and mode in (1, 2, 3, 4, 5):
+            p0[16] = fix[0]; p0[17] = np.log10(fix[1]); tail = p0[16:18].copy()
+            p0, lo, hi, xs = p0[:16], lo[:16], hi[:16], xs[:16]
+            print(f"  leak held at D {fix[0]} {'tg' if mode in (2, 5) else 'lam'} {fix[1]}")
+        if off_given is not None and mode == 6:
+            p0[16:19] = off_given; tail = p0[16:19].copy()
+            p0, lo, hi, xs = p0[:16], lo[:16], hi[:16], xs[:16]
+            print(f"  per-ratio reference offsets held at {off_given} (1.2:1, 2:1, 3:1)")
+        full = lambda p: np.concatenate([p, tail])
         t0 = time.time()
-        report(mode, p0, Tp, curves_L, st, "start (current constants, curves refitted in the node domain)")
+        report(mode, full(p0), Tp, curves_L, st, "start (current constants, curves refitted in the node domain)")
         print(f"    (one evaluation + report: {time.time() - t0:.1f} s)")
         def resid(p):
-            pd = unpack(p, mode)
-            sres, _, _, d0, _, _ = st.fit(pd, mode)
+            pd = unpack(full(p), mode)
+            sres, _, _, d0, _, _ = st.fit(pd, mode, off_of(full(p), mode))
             return np.concatenate([dyn_resid(curves_L, Tp, pd, mode, d0), w_static * sres])
         t0 = time.time()
         r = least_squares(resid, p0, bounds=(lo, hi), x_scale=xs, diff_step=1e-3, max_nfev=nfev, loss="soft_l1", f_scale=1.0)
         print(f"  fit: nfev {r.nfev} cost {r.cost:.3f} ({time.time() - t0:.0f} s)")
-        results[mode] = report(mode, r.x, Tp, curves_L, st, "fitted", cpp=("--cpp" in args))
-        print("  p:", np.round(r.x, 6).tolist())
+        results[mode] = report(mode, full(r.x), Tp, curves_L, st, "fitted", cpp=("--cpp" in args))
+        print("  p:", np.round(full(r.x), 6).tolist())
     print("\nSUMMARY (current best: statics 0.216 / 0.73, steady ~0.1, bursts ~0.01, DUAL 0.011)")
     for mode, R in results.items():
         print(f"  mode {mode}: statics54 {R['e54'][0]:.3f}/{R['e54'][1]:.2f} statics198 {R['e198'][0]:.3f}/{R['e198'][1]:.2f} full {R['efull'][0]:.3f}/{R['efull'][1]:.2f} | silence {np.round(R['sil'], 3).tolist()} | steady {R['steady'][0]:.3f}/{R['steady'][1]:.2f} bursts {R['bursts'][0]:.3f}/{R['bursts'][1]:.2f} DUAL {R['dual'][0]:.3f}/{R['dual'][1]:.2f}")

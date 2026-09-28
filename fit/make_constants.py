@@ -14,7 +14,7 @@ SRC = os.path.join(DATA, "constants.json")
 
 
 def render():
-    cal = load_cal(SRC)
+    cal = load_cal(SRC)   # raises on any field the engine's layout does not have, or with the wrong count
     d = json.load(open(SRC))
     fitted = set(d["values"].keys())
     ref = d.get("reference", {})

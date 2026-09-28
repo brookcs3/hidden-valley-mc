@@ -21,7 +21,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from common import F, ITEMS, MODEL, load_cal, save_cal, render_item, feat_residual, protocol, FS  # noqa: E402
 
 RATIOS = protocol.RATIOS; ATTACKS = protocol.ATTACKS; RECOVERS = protocol.RECOVERS
-N = 96; X0 = -20.0; DX = 1.0
+import ctypes, hvmc_core  # noqa: E402
+_L = hvmc_core.lib()
+_n = ctypes.c_int(); _x0 = ctypes.c_double(); _dx = ctypes.c_double()
+_L.hvmc_curve_grid(ctypes.byref(_n), ctypes.byref(_x0), ctypes.byref(_dx))
+N = int(_n.value); X0 = float(_x0.value); DX = float(_dx.value)   # the gain computer's grid, from the engine
 XG = X0 + DX * np.arange(N)
 GAIN12 = 0.0   # make-up of position 12 plus the Nickel path gain, set in run()
 
@@ -146,10 +150,17 @@ def env_of_item(item_id, Tp, curves, ta, tr, floor, t2, c2, d0, depth, sv):
     v = detector(np.abs(x), float(fs), ta, tr, floor, dual, t2, c2, 0.0, T, depth, sv)
     r = RATIOS.index(s.get("discrete_ratio", "4:1"))
     gr = np.maximum(curve_at(curves[r], v - T), 0.0)
-    per = int(round(fs / st["f"]))
-    m = len(gr) // per
-    lin = (10 ** (-gr[:m * per] / 20.0)).reshape(m, per).mean(axis=1)
-    return 20 * np.log10(lin) + GAIN12
+    gr[v <= T - depth] = 0.0
+    # the reference's 'env' feature is a per-period lock-in of the fundamental of the output against the input, so the mirror's
+    # envelope is taken the same way (the per-period mean of the linear gain differs by several dB on the onset period)
+    y = x * 10 ** (-gr / 20.0)
+    per = fs / st["f"]; m = int(len(y) / per)
+    out = np.empty(m)
+    for k in range(m):
+        n0 = int(round(k * per)); n1 = int(round((k + 1) * per))
+        cy = protocol.lockin(y, st["f"], fs, n0, n1); cx = protocol.lockin(x, st["f"], fs, n0, n1)
+        out[k] = 20 * np.log10(abs(cy) / (abs(cx) + 1e-30) + 1e-30)
+    return out + GAIN12
 
 
 def d0_for(ta, tr, floor, t2, c2, fs=FS, level=-20.0, secs=2.5, f=1000.0, Tk=-37.5, depth=0.0, sv=17.4):
@@ -204,7 +215,7 @@ def run():
         return np.concatenate([np.atleast_1d(o) for o in out])
     p0 = [0.035e-3, 0.42e-3, 1.76e-3, 6.4e-3, 19.3e-3, 58.0e-3] + [0.095, 0.136, 0.334, 0.334, 0.489, tr[5]] + [t2, c2, 0.55, np.log10(17.4)]
     lo = [1e-5] * 6 + [0.01] * 6 + [0.005, 1.5, float(os.environ.get("HVMC_DEPTH_MIN", -20.0)), 0.3]; hi = [1.0] * 6 + [5.0] * 6 + [1.0, 60.0, 40.0, 3.0]
-    r = least_squares(resid_all, np.clip(p0, lo, hi), bounds=(lo, hi), x_scale=[1e-3] * 6 + [0.05] * 6 + [0.01, 2.0, 1.0, 0.3], diff_step=1e-3, max_nfev=120, loss="soft_l1", f_scale=1.0)
+    r = least_squares(resid_all, np.clip(p0, lo, hi), bounds=(lo, hi), x_scale=[1e-3] * 6 + [0.05] * 6 + [0.01, 2.0, 1.0, 0.3], diff_step=1e-3, max_nfev=400, loss="soft_l1", f_scale=1.0)
     ta, tr, t2, c2, depth, sv = unpack(r.x)
     n_ss = 36 + 12 + 6
     print(f"  detector fit: attack {np.round(np.array(ta) * 1e3, 3)} ms, recover {np.round(tr, 4)} s, dual t2 {t2:.4f} c2 {c2:.2f}, depth {depth:.2f} dB, Sv {sv:.2f} dB")

@@ -50,9 +50,12 @@ def load_cal(path=os.path.join(DATA, "constants.json")):
     if os.path.exists(path):
         d = json.load(open(path))
         for name, vals in d["values"].items():
-            if name in MODEL.fields:
-                sl = MODEL.field(name)
-                cal[sl] = np.asarray(vals, dtype=float)
+            if name not in MODEL.fields:
+                raise KeyError(f"{path}: field {name} is not in the engine's calibration layout (fields renamed? rerun the stage that writes it)")
+            off, cnt = MODEL.fields[name]
+            if len(vals) != cnt:
+                raise ValueError(f"{path}: field {name} has {len(vals)} values, the engine expects {cnt}")
+            cal[off:off + cnt] = np.asarray(vals, dtype=float)
     return cal
 
 

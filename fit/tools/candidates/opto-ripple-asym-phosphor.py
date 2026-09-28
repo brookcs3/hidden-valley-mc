@@ -55,7 +55,9 @@ LP = (5147.0, 0.718)
 KINDS = {0: "control (symmetric persistence)", 1: "(b) asymmetric persistence rise/fall", 2: "(b') asymmetric, fall rate x (1 + kappa L)",
          3: "(c1) light-dependent cell low pass after the turn-on", 4: "(c1') illumination-dependent state attack",
          5: "(c2) second cell in parallel with its own persistence", 6: "(c3) cell law after the integration: states chase the light, cond = (sum w s)^gamma",
-         7: "(c3+b) cell law after the integration with an asymmetric persistence"}
+         7: "(c3+b) cell law after the integration with an asymmetric persistence",
+         8: "(c4) release quench with a free exponent: rate (1 + mu s^rho) / trel", 9: "(c5) state attack slowing with conductance: rate 1 / (tatt (1 + kappa s))",
+         10: "(c6) excursion-dependent attack: rate (1 + beta (target - s)) / (tatt scale): fast on a step, slow on the ripple"}
 
 
 # ------------------------------------------------------------------------------------------------ the mirror
@@ -84,10 +86,14 @@ def run_one(x, n, fs, A, vth, nexp, gam, tau_r, w, tatt, trel, L0, mu, b2, b3, f
       kind 3: after the persistence a second one-pole Lc with rate (1 + p2 Lc) / p1 both ways; the cell sees Lc
       kind 4: the states' attack rate is (1 + p1 s_i) / (p2 tatt_i)
       kind 5: cond = (1 - p1) sum_i w_i s_i + p1 s_b, s_b chasing (Lb + L0)^gam with Lb = L through a pole p2, attack/release of state 1 x p3
-      kind 6: the states chase the light L + L0 itself (linear attack, quenched release in light units) and cond = (sum_i w_i s_i)^gam"""
+      kind 6: the states chase the light L + L0 itself (linear attack, quenched release in light units) and cond = (sum_i w_i s_i)^gam
+      kind 8: the release rate is (1 + mu s_i^p1) / trel_i (p1 = 1 is the chosen model)
+      kind 9: the attack rate is 1 / (p2 tatt_i (1 + p1 s_i)): the attack slows as the cell conducts (an asymmetry present at low GR)
+      kind 10: the attack rate is (1 + p1 (target - s_i)) / (p2 tatt_i): a burst's overdrive is attacked fast, the ripple slowly"""
     kr = 1.0 - np.exp(-1.0 / (tau_r * fs))
     kf = 1.0 - np.exp(-1.0 / (p1 * fs)) if ((kind == 1 or kind == 7) and p1 > 0.0) else kr
-    tsc = p2 if kind == 4 else 1.0
+    tsc = p2 if (kind == 4 or kind == 9 or kind == 10) else 1.0
+    rho = p1 if kind == 8 else 1.0
     kA0 = 1.0 - np.exp(-1.0 / (tsc * tatt[0] * fs)); kA1 = 1.0 - np.exp(-1.0 / (tsc * tatt[1] * fs)); kA2 = 1.0 - np.exp(-1.0 / (tsc * tatt[2] * fs))
     rA0 = 1.0 / (tsc * tatt[0] * fs); rA1 = 1.0 / (tsc * tatt[1] * fs); rA2 = 1.0 / (tsc * tatt[2] * fs)
     r0 = 1.0 / (trel[0] * fs); r1 = 1.0 / (trel[1] * fs); r2 = 1.0 / (trel[2] * fs)
@@ -121,9 +127,16 @@ def run_one(x, n, fs, A, vth, nexp, gam, tau_r, w, tatt, trel, L0, mu, b2, b3, f
         else:
             Lu = L
         target = (Lu + L0) if (kind == 6 or kind == 7) else (Lu + L0) ** gam
-        q0 = 1.0 - np.exp(-(1.0 + mu * s0) * r0); q1 = 1.0 - np.exp(-(1.0 + mu * s1) * r1); q2 = 1.0 - np.exp(-(1.0 + mu * s2) * r2)
+        if kind == 8:
+            q0 = 1.0 - np.exp(-(1.0 + mu * s0 ** rho) * r0); q1 = 1.0 - np.exp(-(1.0 + mu * s1 ** rho) * r1); q2 = 1.0 - np.exp(-(1.0 + mu * s2 ** rho) * r2)
+        else:
+            q0 = 1.0 - np.exp(-(1.0 + mu * s0) * r0); q1 = 1.0 - np.exp(-(1.0 + mu * s1) * r1); q2 = 1.0 - np.exp(-(1.0 + mu * s2) * r2)
         if kind == 4:
             a0 = 1.0 - np.exp(-(1.0 + p1 * s0) * rA0); a1 = 1.0 - np.exp(-(1.0 + p1 * s1) * rA1); a2 = 1.0 - np.exp(-(1.0 + p1 * s2) * rA2)
+        elif kind == 9:
+            a0 = 1.0 - np.exp(-rA0 / (1.0 + p1 * s0)); a1 = 1.0 - np.exp(-rA1 / (1.0 + p1 * s1)); a2 = 1.0 - np.exp(-rA2 / (1.0 + p1 * s2))
+        elif kind == 10:
+            a0 = 1.0 - np.exp(-rA0 * (1.0 + p1 * (target - s0))); a1 = 1.0 - np.exp(-rA1 * (1.0 + p1 * (target - s1))); a2 = 1.0 - np.exp(-rA2 * (1.0 + p1 * (target - s2)))
         else:
             a0 = kA0; a1 = kA1; a2 = kA2
         s0 += (target - s0) * (a0 if target > s0 else q0)
@@ -332,6 +345,7 @@ class Scorer:
         self.bs_fit = Batch(self.stat_fit_ids, secs=1.5)
         self.bb = Batch(BURSTS)
         self.b100 = Batch([f"opto_static_f100_{l}" for l in range(-40, 11, 2)])
+        self.b100_fit = Batch([f"opto_static_f100_{l}" for l in range(-40, 11, 4)], secs=1.5)   # guard: the 100 Hz statics must stay with the 1 kHz ones
         # fine knee sweeps (A) and the no-GR rows (D)
         self.knee = {}
         for thr in ("20", "10"):
@@ -366,13 +380,15 @@ class Scorer:
             rows.append(e)
         return np.array(rows), ms
 
-    def resid(self, sh, wg=2.0, w3=1.0, w5=0.5, w7=0.3, ws=20.0, wk=20.0, wb=100.0):
-        """harmonics (gain 2, H3 1, H5 0.5, H7 0.3 per dB), statics x 20 per dB, fine knees x 20, bursts x 100 on the stage-4 weights:
-        with these the chosen model's cost is about 700 harmonics / 260 statics / 20 knees / 900 bursts, so a candidate can only buy
-        harmonics by keeping the statics within about 0.05 dB and the bursts within 0.005 dB of where they are"""
+    def resid(self, sh, wg=0.5, w3=1.0, w5=0.5, w7=0.3, ws=40.0, wk=40.0, wb=20.0):
+        """harmonics (gain 0.5, H3 1, H5 0.5, H7 0.3 per dB), statics x 40 per dB (1 kHz at four positions and the 100 Hz series at
+        position 20, so that a fixed-time smoothing cannot buy harmonics with a frequency-dependent static), fine knees x 40, bursts x 20:
+        the chosen model's cost is then about 860 harmonics / 530 statics / 40 knees / 1030 bursts (sum of squares / 2), so doubling
+        the static or burst error costs more than any harmonic gain on offer, while a candidate is free to improve them"""
         E, _ = self.harm_errors(sh, fit=True)
         out = [wg * E[:, 0], w3 * np.nan_to_num(E[:, 1]), w5 * np.nan_to_num(E[:, 2]), w7 * np.nan_to_num(E[:, 3])]
         out.append(ws * (self.bs_fit.gains(sh) - np.array([F[i] for i in self.stat_fit_ids])))
+        out.append(ws * (self.b100_fit.gains(sh) - np.array([F[i] for i in self.b100_fit.ids])))
         out.append(wk * self.knee_resid(sh))
         for i, m in zip(BURSTS, self.bb.envs(sh)):
             n = min(len(m), len(F[i])); out.append(wb * burst_weight(i, n) * (np.array(m[:n]) - np.array(F[i][:n])))
@@ -469,6 +485,9 @@ def null_scan(S):
     v = base.copy(); v.mu = 0.0; v.trel = v.tatt.copy(); v.tau_r = 1e-6; variants.append(("linear symmetric states, no pole", v))
     v = base.copy(); v.trel = v.tatt / 3.0; v.mu = 0.0; variants.append(("mu 0, release 3x faster than attack", v))
     v = base.copy(); v.kind = 6; variants.append(("(c3) cell law after the integration, constants as is", v))
+    for k in (2.0, 3.0, 5.0):
+        v = base.copy(); v.tatt = v.tatt * k; variants.append((f"attack constants x {k:g} (release-dominated asymmetry at lower GR)", v))
+    v = base.copy(); v.tatt = v.tatt * 3.0; v.tau_r = 1e-5; variants.append(("attack constants x 3, persistence 10 us", v))
     lv = np.arange(-30.0, 8.1, 2.0); n = int(1.5 * FS); t = np.arange(n) / FS; f = 1000.0
     X = np.array([10 ** (l / 20) * np.sin(2 * np.pi * f * t) for l in lv]); lens = np.full(len(lv), n, dtype=np.int64)
     Y = np.zeros_like(X); Cd = np.zeros_like(X)
@@ -487,6 +506,10 @@ def null_scan(S):
         print("      H3:    " + " ".join(f"{x:6.1f}" for x in h3))
         print("      H5:    " + " ".join(f"{x:6.1f}" for x in h5))
         print("      c4/c2: " + " ".join(f"{x:6.1f}" for x in r))
+    print("\n   and the full report for the slow-attack variants (no other change):")
+    for k in (2.0, 3.0):
+        v = base.copy(); v.tatt = v.tatt * k; S.report(v, f"attack constants x {k:g}", items=(k == 3.0))
+    v = base.copy(); v.tatt = v.tatt * 3.0; v.tau_r = 1e-5; S.report(v, "attack constants x 3, persistence 10 us", items=False)
 
 
 # ------------------------------------------------------------------------------------------------ candidate fits
@@ -504,6 +527,9 @@ def fit_candidate(S, kind, p0, lo, hi, xs, label, dyn=False, max_nfev=40):
         if kind == 4: s.p1 = 10.0 ** ps[0]; s.p2 = ps[1]
         if kind == 5: s.p1 = ps[0]; s.p2 = 10.0 ** ps[1]; s.p3 = 10.0 ** ps[2]
         if kind == 7: s.p1 = 10.0 ** ps[0]
+        if kind == 8: s.p1 = ps[0]
+        if kind == 9: s.p1 = 10.0 ** ps[0]; s.p2 = ps[1]
+        if kind == 10: s.p1 = 10.0 ** ps[0]; s.p2 = 10.0 ** ps[1]
         s.tau_r = 10.0 ** v[npar]; s.shift = v[npar + 1]; s.dlogC = v[npar + 2]
         if dyn:
             q = v[npar + 3:]
@@ -541,11 +567,9 @@ def main():
         print(f"   cost of the chosen model under the fit weights: {0.5 * float(np.sum(r0 ** 2)):.1f}")
         results["chosen"] = S.report(base, "the chosen model as is (no fit)", items=False)
         s, _ = fit_candidate(S, 0, [], [], [], [], "control: tau_el, knee shift, logC only")
-        results["control"] = S.report(s, "control refit (tau_el, knee shift, logC)", items=True)
-        s, _ = fit_candidate(S, 0, [], [], [], [], "control + dynamics refit (w, tatt, trel, mu)", dyn=True, max_nfev=50)
-        results["ctrl-dyn"] = S.report(s, "control with the state constants refitted", items=True)
+        results["control"] = S.report(s, "control refit (tau_el, knee shift, logC)", items=False)
         s, _ = fit_candidate(S, 1, [np.log10(2e-4)], [-5.0], [-2.5], [0.1], "(b) asym persistence: tau_fall")
-        results["b"] = S.report(s, "(b) asymmetric persistence", items=True)
+        results["b"] = S.report(s, "(b) asymmetric persistence", items=False)
         s, _ = fit_candidate(S, 2, [np.log10(2e-4), np.log10(1.0)], [-5.0, -3.0], [-2.5, 3.0], [0.1, 0.2], "(b') asym persistence, fall rate x (1 + kappa L)")
         results["b2"] = S.report(s, "(b') asymmetric persistence with light-dependent fall", items=False)
         s, _ = fit_candidate(S, 3, [np.log10(2e-4), np.log10(1.0)], [-5.0, -3.0], [-2.0, 3.0], [0.1, 0.2], "(c1) cell low pass, rate x (1 + kappa Lc)")
@@ -554,10 +578,14 @@ def main():
         results["c1b"] = S.report(s, "(c1') illumination-dependent state attack", items=True)
         s, _ = fit_candidate(S, 5, [0.3, np.log10(3e-4), 0.0], [0.02, -5.0, -1.5], [0.9, -2.0, 1.5], [0.05, 0.1, 0.1], "(c2) second cell, share / persistence / speed")
         results["c2"] = S.report(s, "(c2) second cell in parallel with its own persistence", items=False)
-        s, _ = fit_candidate(S, 6, [], [], [], [], "(c3) cell law after the integration, dynamics refitted", dyn=True, max_nfev=60)
-        results["c3"] = S.report(s, "(c3) cell law after the integration: states chase the light, cond = (sum w s)^gamma", items=True)
-        s, _ = fit_candidate(S, 7, [np.log10(1e-4)], [-5.0], [-2.5], [0.1], "(c3+b) cell law after the integration with an asymmetric persistence", dyn=True, max_nfev=60)
-        results["c3b"] = S.report(s, "(c3+b) cell law after the integration, asymmetric persistence", items=True)
+        s, _ = fit_candidate(S, 10, [np.log10(3.0), np.log10(3.0)], [-1.0, 0.0], [2.5, 1.5], [0.2, 0.1], "(c6) excursion-dependent attack: beta, tatt scale", max_nfev=60)
+        results["c6"] = S.report(s, "(c6) excursion-dependent attack (fast on a step, slow on the ripple)", items=True)
+        s, _ = fit_candidate(S, 10, [np.log10(3.0), np.log10(3.0)], [-1.0, 0.0], [2.5, 1.5], [0.2, 0.1], "(c6) excursion-dependent attack, dynamics refitted", dyn=True, max_nfev=100)
+        results["c6-dyn"] = S.report(s, "(c6) excursion-dependent attack with the state constants refitted", items=True)
+        s, _ = fit_candidate(S, 8, [1.0], [0.3], [2.0], [0.05], "(c4) quench exponent rho, dynamics refitted", dyn=True, max_nfev=100)
+        results["c4"] = S.report(s, "(c4) release quench with a free exponent", items=False)
+        s, _ = fit_candidate(S, 6, [], [], [], [], "(c3) cell law after the integration, dynamics refitted", dyn=True, max_nfev=100)
+        results["c3"] = S.report(s, "(c3) cell law after the integration: states chase the light, cond = (sum w s)^gamma", items=False)
         print("\n== summary (H3 / H5 / H7 error rms over the 27 items; statics t20; fine knee t20/t10; bursts weighted/plain)")
         for k, v in results.items():
             print(f"   {k:8s} H3 {v['h3all']:.2f} (100 Hz {v['h3'][100][0]:.2f}, 1 kHz {v['h3'][1000][0]:.2f}, 4 kHz {v['h3'][4000][0]:.2f}) | H5 {v['h5all']:.2f} ({v['h3'][100][1]:.1f}, {v['h3'][1000][1]:.1f}, {v['h3'][4000][1]:.1f}) | "

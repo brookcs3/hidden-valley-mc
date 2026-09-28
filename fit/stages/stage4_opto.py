@@ -178,7 +178,7 @@ def run(validate_only=False, quick=False):
     t0 = time.time()
     cal = load_cal()
     G0 = float(cal[cidx("o_gain_db", 11)] + cal[cidx("x_gain_db", 0)]); g0_lin = 10.0 ** (G0 / 20.0)
-    sh = Shape(cal)
+    sh = Shape(cal); sh.n = 1.0; cal[cidx("o_n")] = 1.0   # the light law exponent is held at 1 (docs/opto-fix.md 2.3)
     # ---- mirror against the engine (the engine is the truth; the mirror is only a faster copy)
     chk = ["opto_static_t20_-10", "opto_static_t20_2", "opto_static_t10_-20", "opto_static_f8000_2", "opto_burst_-10", "opto_harm_t18_-10_f1000"]
     b = Batch(chk); mf = b.render(sh, g0_lin)

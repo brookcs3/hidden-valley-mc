@@ -64,6 +64,8 @@ public:
         std::memcpy(cal, calDefaults().v, sizeof(cal));
         for (int i = 0; i < kNumInputParams; ++i) ctl[i] = paramDefault(i);
     }
+    Engine(const Engine&) = delete;               // the stages keep pointers into this object's own tables
+    Engine& operator=(const Engine&) = delete;
 
     // replace the calibration (the fitter does this); takes effect at the next prepare()
     void setCalibration(const double* v) { std::memcpy(cal, v, sizeof(cal)); }

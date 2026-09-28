@@ -432,7 +432,7 @@ def main():
         print(f"  {rr['core']:6s} {rr['variant']}: even {m['even_rms']:5.2f}/{m['even_max']:5.1f}  odd {m['odd_rms']:5.2f}/{m['odd_max']:5.1f}  "
               f"gain {m['gain_rms']:.3f}  quiet-even {m['quiet_even_rms']:5.2f}/{m['quiet_even_max']:5.1f}   "
               + " ".join(f"{n}={v:.4g}" for n, v in zip(rr["names"], rr["x"])))
-    out = os.path.join(HERE, "xfmr-even-remanence.result.json")
+    out = os.path.join(HERE, f"xfmr-even-remanence.result.{'-'.join(CORES)}.json")   # per-core runs do not clobber each other
     json.dump(results, open(out, "w"), indent=1)
     print(f"\nwrote {out}")
 
