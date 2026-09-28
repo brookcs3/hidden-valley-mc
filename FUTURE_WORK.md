@@ -48,3 +48,4 @@ There is none; hosts show generic controls and the read-only meters. A panel wit
 - **The 0.1 ms and 0.5 ms attack constants** are fitted on the 4:1 items only; the ballistics capture's charge-law cells (multitone and pink noise at equal peak and rms) would pin them and belong in the protocol with the items above.
 - **The optical stage's 4 kHz fifth harmonic** at 48 kHz is aliasing of the light pulse's harmonics in the loop; HQ 2X removes it with the same constants (docs/opto-ripple-fix.md). STANDARD is left as the reference runs it.
 - **The transformer onset burst's last 4 dB and the 120 and 160 Hz +21 dBFS points** at the foot of the reference's +24 dBFS ceiling remain after the three even-order mechanisms (docs/xfmr-even-fix.md section 4).
+- **High-level edges** (`fit/data/discriminate_ceiling.json`): Iron at 160 Hz above +26 dBFS limits up to 2.9 dB less than the reference; the reference's 320 Hz step at +24 dBFS is left unmodelled as an artefact.
