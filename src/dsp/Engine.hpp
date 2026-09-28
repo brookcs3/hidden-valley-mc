@@ -196,18 +196,19 @@ private:
     // one sample at the internal rate for both channels
     inline void internal(const double* x, double* out)
     {
-        double a[2], ad[2], h[2];
+        double a[2], ad[2], h[2], wo_[2];
         for (int c = 0; c < 2; ++c) {
             Ch& k = ch[c];
             const double noise = k.uranium ? k.decay.tick() : 0.0;
             double xin = x[c] * caIn;   // CLASS A: the hotter input, ahead of both compressors (1.0 otherwise)
             xin = k.caLp.tick(k.caHp.tick(xin));   // CLASS A input transformer corners (pass-through unless set)
             const double yo = k.opto.process(xin, noise);
-            const double wo = k.optoIn.tick(optoOn[c] ? 1.0 : 0.0);
+            const double wo = k.optoIn.tick(optoOn[c] ? 1.0 : 0.0); wo_[c] = wo;
             a[c] = xin + wo * (yo - xin);
             // the discrete stage's input: the inter-stage gain when both stages are in (following the optical crossfade), and the
             // SIDECHAIN FILTER's trim, both on audio and sidechain alike
-            const double gi = (1.0 + wo * (interLin - 1.0)) * k.scfTrim.tick(k.disc.filterIn() ? scfLin : 1.0);
+            const double gTrim = k.scfTrim.tick(k.disc.filterIn() ? scfLin : 1.0);
+            const double gi = wo * interLin + (1.0 - wo) * gTrim;   // the two do not add: with the optical stage in the filter changes nothing here
             ad[c] = a[c] * gi;
             h[c] = k.disc.sidechain(ad[c]);
         }
@@ -217,7 +218,9 @@ private:
             const double yd = k.disc.process(ad[c], h[c]);
             const double wd = k.discIn.tick(discOn[c] ? 1.0 : 0.0);
             const double b = a[c] + wd * (yd - a[c]);
-            out[c] = k.xf.process(b) * caOut;
+            // after the transformer, the optical cell's shunted signal bleeds through at o_bleed (measured 1/200), following the
+            // optical bypass crossfade and bypassing both make-ups (docs/stage-interaction.md)
+            out[c] = (k.xf.process(b) + wo_[c] * bleed * k.opto.shunted()) * caOut;
         }
     }
 
@@ -243,7 +246,7 @@ private:
         ClassAParams ca;
         ca.a2 = cal[kc_ca_a2]; ca.a3 = cal[kc_ca_a3]; ca.a2Env = cal[kc_ca_a2_env]; ca.ceilDb = cal[kc_ca_ceil_db]; ca.q = cal[kc_ca_ceil_q]; ca.asymDb = cal[kc_ca_ceil_asym_db];
         caIn = classA ? dbToLin(cal[kc_ca_in_db]) : 1.0; caOut = classA ? dbToLin(cal[kc_ca_out_db]) : 1.0;
-        interLin = dbToLin(cal[kc_d_inter_db]); scfLin = dbToLin(cal[kc_d_scf_trim_db]);
+        interLin = dbToLin(cal[kc_d_inter_db]); scfLin = dbToLin(cal[kc_d_scf_trim_db]); bleed = cal[kc_o_bleed];
         for (int c = 0; c < 2; ++c) {
             ch[c].caHp.set(FirstOrder::kHighPass, classA ? cal[kc_ca_in_fl_hz] : 0.0, fi);
             ch[c].caLp.set(FirstOrder::kLowPass, classA ? cal[kc_ca_in_lp_hz] : 0.0, fi);
@@ -291,7 +294,7 @@ private:
     double cal[kCalSize];
     int ctl[kNumInputParams];
     bool dirty = true, prepared = false, first = true, stereo = true, lastExhibition = false;
-    double caIn = 1.0, caOut = 1.0, interLin = 1.0, scfLin = 1.0;
+    double caIn = 1.0, caOut = 1.0, interLin = 1.0, scfLin = 1.0, bleed = 0.0;
     bool optoOn[2] = { true, true }, discOn[2] = { true, true };
     double hostFs = 48000.0;
     int quality = 0, os = 1;

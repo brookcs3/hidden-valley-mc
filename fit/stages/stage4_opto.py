@@ -27,8 +27,19 @@ FSF = float(FS)
 LEVELS = list(range(-50, 15, 2))
 FIT_POS = (6, 10, 14, 18, 20, 22, 24)
 BURSTS = [f"opto_burst_{l}" for l in (-26, -18, -10, -2)] + [f"opto_blen_{b}" for b in (0.05, 0.2, 1.0, 4.0)] + ["opto_pulses"]
-HARMS = [f"opto_harm_t{k}_{l}_f1000" for k in (14, 18, 22) for l in (-20, -10, 0)] + ["opto_harm_t18_-10_f100", "opto_harm_t22_0_f100", "opto_harm_t18_-10_f4000", "opto_harm_t22_0_f4000"]
 ALL_HARMS = [i for i in ITEMS if i.startswith("opto_harm_t")]
+HARMS = ALL_HARMS
+DISC_PATH = os.path.join(DATA, "discriminate_opto.json")
+DISC = json.load(open(DISC_PATH)) if os.path.exists(DISC_PATH) else None
+# the fine knee sweeps (A) as pseudo-items, so the joint fit cannot buy harmonics with a softer knee
+KNEE_IDS = []
+if DISC is not None:
+    for thr, kn in DISC["knee"].items():
+        for lv, gref in zip(kn["levels"], kn["gain_db"]):
+            iid = f"_knee_t{thr}_{lv:+.1f}"
+            ITEMS[iid] = {"id": iid, "group": "knee", "fs": FS, "stim": {"kind": "sine", "level": float(lv), "f": 1000.0, "secs": 1.5}, "set": {"optical_bypass": "In", "optical_threshold": int(thr)}, "feat": {"type": "gain_db", "last_s": 0.5}}
+            F[iid] = float(gref); KNEE_IDS.append(iid)
+HF_IDS = [f"opto_static_f{f}_{l}" for f in (3000, 8000) for l in range(-40, 11, 4)]
 
 
 def cidx(name, i=0): return MODEL.fields[name][0] + i
@@ -50,7 +61,7 @@ def lp_matched(fc, Q, fs):
 
 
 @njit(cache=True)
-def run_one(x, n, fs, A, vth, nexp, gam, tau_el, w, tatt, trel, L0, mu, b2, b3, fc, Q, out):
+def run_one(x, n, fs, A, vth, nexp, gam, tau_el, w, tatt, trel, L0, mu, b2, b3, fc, Q, bl, out):
     """OptoStage::process with the sidechain filter out, no hwUnit, no material options: divider v = xa / (1 + cond); sidechain
     low pass; d = A |s|; light (d - vth)^n above the turn-on; persistence; target = (L + L0)^gam; three states, quenched release"""
     kEl = 1.0 - np.exp(-1.0 / (tau_el * fs))
@@ -58,12 +69,13 @@ def run_one(x, n, fs, A, vth, nexp, gam, tau_el, w, tatt, trel, L0, mu, b2, b3, 
     r0 = 1.0 / (trel[0] * fs); r1 = 1.0 / (trel[1] * fs); r2 = 1.0 / (trel[2] * fs)
     lb0, lb1, lb2, la1, la2 = lp_matched(fc, Q, fs)
     c0 = L0 ** gam
+    uf = 1.0 / np.sqrt(-3.0 * b3) if b3 < 0.0 else 1e30
     z1 = 0.0; z2 = 0.0; L = 0.0; s0 = c0; s1 = c0; s2 = c0; cond = c0
     for i in range(n):
         xi = x[i]
-        xa = xi + b2 * xi * xi + b3 * xi * xi * xi
-        v = xa / (1.0 + cond)
-        out[i] = v
+        v = xi / (1.0 + cond)
+        vc = uf if v > uf else (-uf if v < -uf else v)
+        out[i] = vc + b2 * vc * vc + b3 * vc * vc * vc + bl * (xi - v)   # the amplifier after the divider, plus the cell's shunted signal bleeding to the output (docs/stage-interaction.md), in pre-make-up units
         y = lb0 * v + z1
         z1 = lb1 * v - la1 * y + z2
         z2 = lb2 * v - la2 * y
@@ -79,9 +91,9 @@ def run_one(x, n, fs, A, vth, nexp, gam, tau_el, w, tatt, trel, L0, mu, b2, b3, 
 
 
 @njit(cache=True, parallel=True)
-def run_batch(X, lens, fs, A, vth, nexp, gam, tau_el, w, tatt, trel, L0, mu, b2, b3, fc, Q, out):
+def run_batch(X, lens, fs, A, vth, nexp, gam, tau_el, w, tatt, trel, L0, mu, b2, b3, fc, Q, bl, out):
     for j in prange(X.shape[0]):
-        run_one(X[j], lens[j], fs, A[j], vth, nexp, gam, tau_el, w, tatt, trel, L0[j], mu, b2, b3, fc, Q, out[j])
+        run_one(X[j], lens[j], fs, A[j], vth, nexp, gam, tau_el, w, tatt, trel, L0[j], mu, b2, b3, fc, Q, bl, out[j])
 
 
 class Batch:
@@ -96,7 +108,7 @@ class Batch:
 
     def render(self, sh, g0_lin):
         A = np.array([10.0 ** (sh.thr_db(k) / 20.0) for k in self.thr]); L0 = np.array([sh.leak_light(k) for k in self.thr])
-        run_batch(self.X, self.lens, FSF, A, sh.vth, sh.n, sh.gam, sh.tau_el, sh.w, sh.tatt, sh.trel, L0, sh.mu, sh.b2, sh.b3, sh.fc, sh.Q, self.Y)
+        run_batch(self.X, self.lens, FSF, A, sh.vth, sh.n, sh.gam, sh.tau_el, sh.w, sh.tatt, sh.trel, L0, sh.mu, sh.b2, sh.b3, sh.fc, sh.Q, sh.bleed / g0_lin, self.Y)
         feats = []
         for j, i in enumerate(self.ids):
             y = self.Y[j, :self.lens[j]] * g0_lin
@@ -114,6 +126,7 @@ class Shape:
         self.tatt = np.array([cal[cidx("o_tatt", i)] for i in range(3)], dtype=float); self.trel = np.array([cal[cidx("o_trel", i)] for i in range(3)], dtype=float)
         self.mu = float(cal[cidx("o_rel_mu")]); self.leak = float(cal[cidx("o_leak")]); self.leak_q = float(cal[cidx("o_leak_q")])
         self.fc = float(cal[cidx("o_sc_lp_hz")]); self.Q = float(cal[cidx("o_sc_lp_q")])
+        self.bleed = float(cal[cidx("o_bleed")])   # measured, not fitted here
 
     def thr_db(self, k): return float(self.thr[k - 1])
     def knee(self, k): return 20.0 * np.log10(self.vth) - self.thr_db(k)          # dBFS at the divider output
@@ -155,7 +168,7 @@ def unpack(sh, p):
     return s
 
 
-LO = [-45.0] * 7 + [-0.5, 0.8, -5.0] + [0.005] * 3 + [-4.0] * 3 + [-3.0] * 3 + [-4.0, 0.5, -1.0]
+LO = [-45.0] * 7 + [-0.5, 0.8, -6.0] + [0.005] * 3 + [-4.0] * 3 + [-3.0] * 3 + [-4.0, 0.5, -1.0]
 HI = [5.0] * 7 + [1.5, 3.0, -1.5] + [1.0] * 3 + [0.0] * 3 + [1.0] * 3 + [-0.5, 4.0, 3.0]
 XS = [0.5] * 7 + [0.1, 0.05, 0.1] + [0.05] * 3 + [0.1] * 3 + [0.1] * 3 + [0.1, 0.1, 0.1]
 
@@ -165,10 +178,11 @@ def burst_weight(iid, n):
     return np.where(ref < ref[:20].mean() - 0.3, 1.0, 0.3) / np.sqrt(n / 100.0)
 
 
-def harm_resid(iid, m, wg=2.0, w3=1.0, w5=0.3):
+def harm_resid(iid, m, wg=2.0, w3=1.0, w5=0.5, w7=0.25):
     ref = F[iid]
+    if ITEMS[iid]["stim"]["f"] >= 4000.0: w5 = 0.0   # the 4 kHz H5 rows follow no law at 48 kHz (aliasing of the light pulse; HQ 2X removes it)
     out = [wg * (m["gain_db"] - ref["gain_db"])]
-    for idx, wt in ((1, w3), (3, w5)):
+    for idx, wt in ((1, w3), (3, w5), (5, w7)):
         if m["h"][idx] is not None and ref["h"][idx] is not None:
             out.append(wt * (max(m["h"][idx], -110.0) - max(ref["h"][idx], -110.0)))
     return out
@@ -205,12 +219,16 @@ def run(validate_only=False, quick=False):
     levels = LEVELS[::2] if quick else LEVELS
     stat_ids = [f"opto_static_t{k}_{l}" for k in FIT_POS for l in levels]
     bs, bb, bh = Batch(stat_ids), Batch(BURSTS), Batch(HARMS)
+    bk = Batch(KNEE_IDS) if KNEE_IDS else None
+    bf = Batch(HF_IDS)
     def resid(p):
         s = unpack(sh, p)
         out = [2.0 * (np.array(bs.render(s, g0_lin)) - np.array([F[i] for i in stat_ids]))]
         for i, m in zip(BURSTS, bb.render(s, g0_lin)):
             n = min(len(m), len(F[i])); out.append(burst_weight(i, n) * (np.array(m[:n]) - np.array(F[i][:n])))
         for i, m in zip(HARMS, bh.render(s, g0_lin)): out.append(np.array(harm_resid(i, m)))
+        if bk is not None: out.append(10.0 * (np.array(bk.render(s, g0_lin)) - np.array([F[i] for i in KNEE_IDS])))   # the fine knee, weight 10 per dB
+        out.append(2.0 * (np.array(bf.render(s, g0_lin)) - np.array([F[i] for i in HF_IDS])))   # the 3 kHz and 8 kHz statics, so the harmonics cannot buy a frequency-dependent static
         return np.concatenate(out)
     starts = [pack(sh)]
     phys = pack(sh).copy(); phys[7] = np.log10(3.0); phys[8] = 1.63; phys[10:13] = [0.05, 0.70, 0.25]; phys[13:16] = np.log10([1.0, 0.007, 0.05]); phys[16:19] = np.log10([1.0, 0.007, 0.05])
@@ -271,11 +289,11 @@ def run(validate_only=False, quick=False):
         m = render_item(ITEMS[iid], cal); ref = F[iid]
         if m["h"][1] is not None and ref["h"][1] is not None and ref["h"][1] > -100: h3.append(m["h"][1] - ref["h"][1])
         if m["h"][3] is not None and ref["h"][3] is not None and ref["h"][3] > -100: h5.append(m["h"][3] - ref["h"][3])
-        print(f"  engine {iid}: gain {m['gain_db']:.2f}/{ref['gain_db']:.2f} H3 {m['h'][1]:.1f}/{ref['h'][1]:.1f} H5 {m['h'][3]:.1f}/{ref['h'][3]:.1f}")
+        print(f"  engine {iid}: gain {m['gain_db']:.2f}/{ref['gain_db']:.2f} H2 {m['h'][0]:.1f}/{ref['h'][0]:.1f} H3 {m['h'][1]:.1f}/{ref['h'][1]:.1f} H5 {m['h'][3]:.1f}/{ref['h'][3]:.1f}")
     print(f"  harmonics over {len(h3)} items: H3 error rms {np.sqrt(np.mean(np.square(h3))):.1f} dB, H5 rms {np.sqrt(np.mean(np.square(h5))):.1f} dB")
     disc = os.path.join(DATA, "discriminate_opto.json")
     if os.path.exists(disc):
-        D = json.load(open(disc))
+        D = DISC
         for thr, kn in D["knee"].items():
             lv = np.array(kn["levels"]); ref = np.array(kn["gain_db"])
             m = np.array([MODEL.render(protocol.stimulus({"kind": "sine", "level": float(l), "f": 1000.0, "secs": 3.0}, FS), FS, {"optical_bypass": "In", "optical_threshold": int(thr)}, cal=cal)[0] for l in lv])

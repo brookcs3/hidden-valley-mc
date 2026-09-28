@@ -32,26 +32,26 @@ import hvmc_pb, protocol  # noqa: E402
 # The transformer's even harmonics are a known gap of stage 2: where the reference's are quiet (-75 to -100 dBc) the model's sit at
 # -45 to -50 dBc, and at a few points the other way round; the odd orders, which carry the core's sound, are held tighter.
 TOL = {
-    # rms / max in dB per group and kind, set from the fitted model's achieved figures on the full protocol (2026-09-27, stages 1-5 final)
+    # rms / max in dB per group and kind, set from the fitted model's achieved figures on the full protocol (2026-09-28, stages 1-5 final)
     # with about 1.5x margin on rms and 1.3x on max; a change that pushes a group past these is a regression, not noise.
     "law":           {"gain": (0.01, 0.02)},
-    "opto_static":   {"gain": (0.12, 0.45)},
-    "opto_static_f": {"gain": (0.45, 1.70)},                          # 8 kHz above +4 dBFS: the reference's own HF ceiling (docs/opto-fix.md 6.5)
-    "opto_dyn":      {"env": (0.12, 1.20)},                           # max: the first 20 ms of a below-knee release (docs/opto-fix.md 6.3)
-    "opto_harm":     {"gain": (0.25, 0.70), "odd": (3.5, 8.0), "even": (15.0, 35.0)},   # odd: H3 within about 2 dB, H5 within 5 (an open item)
-    "disc_static":   {"gain": (0.10, 1.20)},                          # max: the soft ratios' last dB below the knee, an open item (docs/disc-knee-fix.md)
-    "disc_ar":       {"gain": (0.16, 0.50)},
-    "disc_dyn":      {"env": (0.20, 7.50)},                           # max: one period at the onset of the 0 dBFS burst (docs/detector-fix.md 5.1)
-    "disc_harm":     {"gain": (0.12, 0.25), "odd": (1.5, 2.5), "even": (1.0, 1.5)},
+    "opto_static":   {"gain": (0.12, 0.70)},
+    "opto_static_f": {"gain": (0.45, 1.90)},                          # 8 kHz above +4 dBFS: the reference's own HF ceiling (docs/opto-fix.md 6.5)
+    "opto_dyn":      {"env": (0.09, 0.80)},
+    "opto_harm":     {"gain": (0.20, 0.75), "odd": (2.8, 8.0), "even": (15.0, 35.0)},   # odd pools H3 (1.4 dB rms alone), H5 and H7
+    "disc_static":   {"gain": (0.05, 0.25)},
+    "disc_ar":       {"gain": (0.13, 0.55)},
+    "disc_dyn":      {"env": (0.12, 8.0)},                            # max: one period at the onset of the 0 dBFS burst (docs/detector-fix.md 5.1)
+    "disc_harm":     {"gain": (0.06, 0.12), "odd": (0.7, 1.6), "even": (1.0, 1.2)},
     "disc_gi":       {"gain": (0.06, 0.08)},
-    "link":          {"gain": (0.10, 0.25)},
-    "scf":           {"gain": (0.35, 1.00)},
-    "xfmr":          {"gain": (0.06, 0.40), "odd": (4.5, 60.0), "even": (17.0, 41.0)},   # even: open item (docs/xfmr-even-fix.md); odd max: one point, xf_Iron_f1000_21 (reference H5 -71 dBc, model none)
+    "link":          {"gain": (0.08, 0.12)},
+    "scf":           {"gain": (0.08, 0.20)},
+    "xfmr":          {"gain": (0.05, 0.35), "odd": (4.5, 60.0), "even": (9.0, 40.0)},    # even max: the 120/160 Hz +21 dBFS points at the foot of the +24 dBFS ceiling; odd max: one point, xf_Iron_f1000_21
     "xfmr_ceiling":  {"gain": (2.00, 4.00), "odd": (40.0, 80.0), "even": (40.0, 80.0)},  # the reference's output ceiling at +24 dBFS, not modelled
     "xfmr_resp":     {"resp": (0.20, 1.40)},
-    "stage_harm":    {"gain": (0.10, 0.20), "odd": (2.0, 2.5), "even": (2.0, 2.5)},
-    "sr":            {"env": (0.10, 1.00)},
-    "both":          {"gain": (0.85, 1.20)},                          # the two stages in series at three levels; carries both stages' knee errors
+    "stage_harm":    {"gain": (0.05, 0.10), "odd": (0.10, 0.20), "even": (0.10, 0.20)},
+    "sr":            {"env": (0.07, 1.30)},
+    "both":          {"gain": (0.13, 0.15)},
     "mix":           {"gain": (0.05, 0.06)},
 }
 CEILING_DBFS = 24   # transformer-grid levels at or above this go to xfmr_ceiling

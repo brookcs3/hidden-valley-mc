@@ -33,18 +33,20 @@ of tests/pb_reference.py: harmonics where the reference is above -80 dBc, even =
   acdec   symmetric core, AC-coupled driver plus a standing bias that collapses with drive: bias0 / (1 + env / E0)
   acasym  CONTROL (not direction a): the current knee asymmetry with the driver AC-coupled: how much of the deep-saturation even
           excess is the driver's rectified DC (a2 x^2 integrates to a flux offset growing with A^2) rather than the knee
-Result (2026-09-27, nfev 40, per core in parallel; pooled over the three cores, test metric): the current model 13.0 dB rms even /
-3.5 odd / 0.043 gain. Driver-only even order with a symmetric core is refuted: sym 19.0 / 3.4, a2env 19.2 / 3.4, classA 18.5 / 2.1
-(the onset term is missing: -103 dBc against -60.5 at 20 Hz +3). A standing bias reproduces the onset term exactly (1 % of phi_k gives
-H2 = H4 = -59 dBc) but no driver-side law of it survives deeper in: dc 14.2, dcenv 12.7, dcdec 15.2, acdc 13.2, acdec 12.6 dB rms even,
-all with even max 26-38 dB at the deep-saturation points (60 Hz +18: model -58, reference -79.5). --offsetmap states the law any
-mechanism must meet: an equivalent static offset of 1.1-1.6 % of phi_k 3 dB below onset, 0.8-1.3 % at onset, 0.15-0.3 % at +3 dB and
-0.01-0.07 % from +6 dB on, falling with frequency (Nickel 0.068 % at 20 Hz to 0.009 % at 80 Hz at the same excess; Iron flat at
-0.04-0.06 %, its driver's rectified DC). The control acasym (the current knee asymmetry with the driver's rectified DC kept out of the
-flux) improves the baseline to 10.0 dB rms even (Nickel 10.0, Iron 9.4, Steel 10.6) with odd 3.5 and gain 0.040 unchanged: the driver's
-a2 x^2 DC term integrating into a flux offset that grows with A^2 is a real part of the deep-saturation excess (sym alone makes -56 dBc
-at 60 Hz +18), but the frequency-dependent collapse of the even order beyond +3 dB of excess (H4 collapsing faster than H2) is not a
-driver-side effect and remains (even max 25-31 dB).
+Result (2026-09-27 23:00-23:50, nfev 40, the three cores in parallel, logs build_xfmr_even_driver_{extract,offsetmap,Nickel,Iron,
+Steel,post}.log; pooled over the three cores with the test metric, even rms / odd rms / gain rms): the current model 13.04 / 3.54 / 0.042.
+Driver-only even order with a symmetric core is REFUTED: sym 18.99 / 3.42, a2env 19.19 / 3.42, classA 18.47 / 2.11, caenv 19.12 / 2.02,
+every one worse than the current model, because the onset term is missing (20 Hz +3: sym H2 -101.7 dBc Nickel, -85.2 Iron, against
+-60.5 / -60.4 in the reference). A standing bias reproduces the onset spike (dc: -70 / -62 dBc) but is then 12-23 dB too loud deep in
+(Nickel 20 Hz +12: -53.0 against -64.4; Iron 60 Hz +18: -48.6 against -66.5): dc 14.19, dcenv 12.74, dcdec 15.20, acdc 13.17,
+acdec 12.58 (the best driver-side form, 0.5 dB better than the current model, even max 29.9). The structural reason is in --offsetmap:
+the equivalent static flux offset the reference needs is 1.1-1.6 % of phi_k 3 dB below onset, 0.8-1.3 % at onset, 0.13-0.3 % at +3 dB and
+0.01-0.07 % from +6 dB on, and at ONE level it spans 100x across frequency (Nickel +18 dBFS: 0.093 % at 20 Hz, 0.028 % at 40, 0.010 % at
+60, 1.25 % at 120 Hz), whereas the driver sees the same signal at every frequency and so delivers one offset per level. The control
+acasym (the current knee asymmetry, the driver's rectified a2 x^2 DC kept out of the flux) is the best figure here: 9.96 / 3.46 / 0.040
+(Nickel 10.03, Iron 9.37, Steel 10.62), so the driver's DC integrating into the flux is a real part of the deep-saturation excess, but the
+frequency-dependent collapse remains (even max 24.6-31.2, e.g. Nickel 60 Hz +18 H4 -53.5 against -94.1). Side finding: a symmetric soft
+ceiling at about 36 dBFS in Iron's driver (classA, caenv) cuts Iron's odd rms 4.95 -> 2.28 and odd max 49.4 -> 18.5 (xf_Iron_f1000_21 H5).
 usage: cd hidden-valley-mc && python3 -u fit/tools/candidates/xfmr-even-driver.py [--extract] [--validate] [--offsetmap] [--fit]
        [--cores=Nickel,Iron] [--cands=asym,sym,dc,...] [--nfev=60] [--refit-asym]   (no flags: everything)"""
 import os, sys, time, numpy as np

@@ -5,7 +5,7 @@
 // driven, at audio rate, from the stage's own output (feedback detection, sidechain tapped before the make-up gain; both measured on the
 // reference, docs/MODEL.md, docs/opto-fix.md).
 //
-//   stage input x -> amplifier (x + b2 x^2 + b3 x^3) -> divider v = g x -> make-up -> out
+//   stage input x -> divider v = g x -> amplifier (v + b2 v^2 + b3 v^3) -> make-up -> out
 //   sidechain: v -> [90 Hz high pass] -> second-order low pass (about 5.1 kHz) -> drive d = A_thr |v| -> light L = (d - vth)^n above
 //   the turn-on vth, nothing below it (panel persistence tau_el) -> plus an idle light leak that grows with the drive squared ->
 //   cell target c* = (L + L0)^gamma -> cell conductance c = sum_i w_i s_i, each state s_i chasing c* with its own attack constant and
@@ -94,8 +94,13 @@ public:
         if (first) reset();
     }
 
-    // the idle light: the sidechain filter blocks it (measured: with the filter in, the no-GR gain no longer falls with the threshold)
-    double leakFor() const { return cfg.scFilter ? 0.0 : leakLightFor(cfg.thr); }
+    // the idle light: with the sidechain filter in it no longer follows the threshold position but sits at a fixed value
+    double leakFor() const
+    {
+        if (!cfg.scFilter) return leakLightFor(cfg.thr);
+        const double c0 = c[kc_o_leak_scf];   // with the filter in the leak is fixed, whatever the threshold position (measured)
+        return c0 > 0.0 ? std::pow(c0, 1.0 / c[kc_o_gamma]) : 0.0;
+    }
     // the idle light for a threshold position: cond0 = o_leak (A / A20)^o_leak_q, entered before the cell law as L0 = cond0^(1/gamma)
     double leakLightFor(int thr) const
     {
@@ -107,13 +112,9 @@ public:
     // one sample; `noise` is added at the divider node (material decay noise), in signal units
     inline double process(double x, double noise = 0.0)
     {
-        double b2 = c[kc_o_b2], b3 = c[kc_o_b3];
-        if (cfg.classA) { caStage.track(x); b2 += caStage.a2Now(); b3 += caStage.a3(); }   // the Class-A module's terms on the amplifier
-        const double uf = b3 < 0.0 ? 1.0 / std::sqrt(-3.0 * b3) : 1e30;   // beyond the polynomial's fold it clips instead of inverting
-        const double xc = x > uf ? uf : (x < -uf ? -uf : x);
-        const double xa = xc + b2 * xc * xc + b3 * xc * xc * xc;
         const double g = 1.0 / (1.0 + cond);
-        double v = g * xa + noise;
+        double v = g * x + noise;   // the divider sees the stage input; the amplifier comes after it (docs/opto-ripple-fix.md)
+        shunt = x - g * x;          // what the cell shunts away: a small fraction of it reaches the unit's output (docs/stage-interaction.md)
         if (cfg.hwUnit) {
             v = hwLp.tick(v);
             // HF loss that grows with gain reduction: the cell's capacitance shunts more as its resistance falls
@@ -161,12 +162,20 @@ public:
         } else {
             cond = fast;
         }
-        const double out = v * dbToLin(gainS.tick(c[kc_o_gain_db + cfg.gain]));
+        // the stage amplifier, after the divider and before the make-up: its even term scales with the divider output (the H2 rows)
+        double b2 = c[kc_o_b2], b3 = c[kc_o_b3];
+        if (cfg.classA) { caStage.track(v); b2 += caStage.a2Now(); b3 += caStage.a3(); }   // the Class-A module's terms on the amplifier
+        const double uf = b3 < 0.0 ? 1.0 / std::sqrt(-3.0 * b3) : 1e30;   // beyond the polynomial's fold it clips instead of inverting
+        const double vc = v > uf ? uf : (v < -uf ? -uf : v);
+        const double va = vc + b2 * vc * vc + b3 * vc * vc * vc;
+        const double out = va * dbToLin(gainS.tick(c[kc_o_gain_db + cfg.gain]));
         return cfg.classA ? caStage.ceiling(out) : out;   // the module's ceiling, outside the loop
     }
 
     // gain reduction of the divider above its idle leak, dB (what the meter cell reads, calibrated to the audio cell; zero at idle)
     double grDb() const { return linToDb((1.0 + cond) / (1.0 + std::pow(leakL, c[kc_o_gamma]))); }
+    // the signal the cell shunted away on the last sample (amplifier output minus divider output)
+    double shunted() const { return shunt; }
 
 private:
     OptoConfig cfg;
@@ -178,7 +187,7 @@ private:
     double grLossFc = -1.0;
     Smoother thrS, gainS, leakS;
     ClassAStage caStage;
-    double leakTarget = 0.0, leakL = 0.0;
+    double leakTarget = 0.0, leakL = 0.0, shunt = 0.0;
     double kEl = 1.0, kEl2 = 1.0, kAtt[kOptoStates] = {}, kRelBase[kOptoStates] = {}, kMemAtt = 1.0, kMemRel = 1.0, kMem = 1.0;
     double kTh = 0.0, kPa = 0.0, kU = 0.0;
     double L = 0.0, L2 = 0.0, st[kOptoStates] = {}, mem = 0.0, expo = 0.0, n1 = 0.0, n2 = 0.0, n3 = 0.0, cond = 0.0, gLast = 1.0;

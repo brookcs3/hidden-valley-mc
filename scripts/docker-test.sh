@@ -19,7 +19,7 @@ docker run --rm --platform "$platform" -v "$ROOT":/src -e BUNDLE="$bundle" -e HO
   set -euo pipefail
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends python3 python3-venv libatomic1 >/dev/null   # Pedalboard'"'"'s wheel needs libatomic
+  apt-get install -y -qq --no-install-recommends python3 python3-venv libatomic1 build-essential >/dev/null   # Pedalboard'"'"'s wheel needs libatomic; the C interface needs a compiler
   python3 -m venv /opt/venv
   /opt/venv/bin/pip install -q --disable-pip-version-check -r /src/tests/requirements.txt
   rc=0; PYTHON=/opt/venv/bin/python bash /src/scripts/test.sh "/src/$BUNDLE" || rc=$?

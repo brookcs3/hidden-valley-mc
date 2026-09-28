@@ -159,7 +159,7 @@ Values:
 
 ### 3.5 Where the block is applied, per stage
 
-**Optical stage.** The module ahead of the divider gets the even and odd terms added to the fitted amplifier terms, on the stage input where `o_b2, o_b3` already act (`o_b2 = 2.54e-5, o_b3 = -5.33e-4`, fitted):
+**Optical stage.** The module gets the even and odd terms added to the fitted amplifier terms, on the divider output where `o_b2, o_b3` act (the amplifier sits after the divider, docs/opto-ripple-fix.md) (`o_b2 = 2.54e-5, o_b3 = -5.33e-4`, fitted):
 
 ```
 b2 = o_b2 + ca_a2 * (1 + ca_a2_env * env),   b3 = o_b3 + ca_a3

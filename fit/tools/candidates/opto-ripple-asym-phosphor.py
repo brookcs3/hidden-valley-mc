@@ -27,6 +27,15 @@ t14/-10 and t22/-20 at every frequency), so whatever places it is a function of 
 light or an asymmetric persistence is frequency dependent by construction; a level-dependent attack/release rate ratio of states that
 are integrators at every audio frequency (the current constants) is not. The diagnostics print the model's null positions by frequency.
 
+Result (logs /tmp/opto_ripple_asym_diag2.log, _srate.log, _fit5.log at 48 kHz, _fs96.log at 96 kHz): the current constants already put the
+null at 6.7 / 7.9 dB of GR at 100 Hz / 1 kHz (reference 6.5-6.9) through the attack/release rate asymmetry of the states (with linear
+symmetric states the model has no null at all). The 4 kHz H5 pattern (7.2 dB rms, a null at t18/-10 instead of t14/-10) is aliasing
+of the light pulse's harmonics (8, 16, 24, 32 kHz...) in the 48 kHz loop: with the same constants and the loop at 96 / 192 kHz the
+4 kHz H5 error is 3.9 / 4.6 dB rms and the null lands on t14/-10 (-89.0 / -90.8 against -91.4 dBc); the engine's quality 1 (2x) mode
+gives the same (7.21 -> 4.03). With the aliasing removed, (b) fits tau_fall = tau_rise (nothing added), (c1) and (c1') go to their
+no-effect bounds, (c2) buys 0.002 dB of burst rms as a fourth state while worsening H3 at 100 Hz / 1 kHz, and every refit of the state
+constants trades H5 at 1 kHz (3.3 -> 4.7-5.7 dB rms) for the bursts (0.0075 -> 0.0035). None of (b), (c) is the ripple mechanism.
+
 The loop is rendered by a numba mirror of OptoStage::process (the stage-4 mirror with the candidates added; validated against the C++
 engine at the start of the run on the current calibration). Nothing under src/ or fit/stages/ or fit/data/ is written.
 usage: cd <repo> && python3 -u fit/tools/candidates/opto-ripple-asym-phosphor.py [--diag] [--nullscan] [--srate] [--fit] [--fs96] [--quick]

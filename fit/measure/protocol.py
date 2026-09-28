@@ -216,6 +216,11 @@ def items():
             {**DISC, "discrete_threshold": 16, "discrete_attack": 1.0, "discrete_recover": "Dual"}, {"type": "env"})
     add("disc_dual_pulses", "disc_dyn", {"kind": "pulses", "pre": -50, "level": -10, "pre_s": 0.5, "on_s": 0.2, "off_s": 0.3, "count": 10, "post_s": 6.0, "f": 1000.0},
         {**DISC, "discrete_threshold": 16, "discrete_attack": 1.0, "discrete_recover": "Dual"}, {"type": "env"})
+    # the soft ratios' post-burst tails (the ratio switch lowers the release reference and slows the bleed, docs/disc-knee-fix.md)
+    for r in ("1.2:1", "2:1", "3:1"):
+        for rc in ("0.1 s", "0.5 s", "1.2 s"):
+            add(f"disc_tail_{r}_{rc}", "disc_dyn", {"kind": "burst", "pre": -50, "level": -10, "pre_s": 0.5, "burst_s": 2.0, "post_s": 8.5, "f": 1000.0},
+                {**DISC, "discrete_threshold": 16, "discrete_attack": 1.0, "discrete_recover": rc, "discrete_ratio": r}, {"type": "env"})
 
     # 8. discrete distortion: no GR against level; under GR against attack and frequency
     for lvl in (-30, -20, -10, 0, 6):

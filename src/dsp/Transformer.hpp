@@ -22,7 +22,9 @@ namespace hvmc {
 
 struct CoreParams {
     double gainDb = 0.0, a2 = 0.0, a3 = 0.0;
-    double flHz = 1.7, satDb = 2.0, q = 9.0, asym = 0.0;   // asym: knee-hardness asymmetry between the polarities
+    double flHz = 1.7, satDb = 2.0, q = 9.0, asym = 0.0;   // asym: knee-hardness asymmetry at the onset of saturation
+    double asymP = 1.8;                     // its decay with the held peak flux: asym / max(peak, kEnvMin)^asymP
+    double pulse = 0.0;                     // saturation pulse, relative to the knee level (even-symmetric, DC-blocked)
     bool linear = false;                    // no saturation (material positions whose core is ideal)
     double hsHz = 0.0, hsDb = 0.0, lpHz = 0.0;
     double hs2Hz = 0.0, hs2Db = 0.0;        // a second shelf (plutonium eddy slug, germanium output shelf)
@@ -39,6 +41,7 @@ struct CoreParams {
     bool operator!=(const CoreParams& o) const
     {
         return gainDb != o.gainDb || a2 != o.a2 || a3 != o.a3 || flHz != o.flHz || satDb != o.satDb || q != o.q || asym != o.asym ||
+               asymP != o.asymP || pulse != o.pulse ||
                linear != o.linear || hsHz != o.hsHz || hsDb != o.hsDb || lpHz != o.lpHz || hs2Hz != o.hs2Hz || hs2Db != o.hs2Db ||
                liftDb != o.liftDb || liftHz != o.liftHz || liftQ != o.liftQ || noiseDb != o.noiseDb || noiseLpHz != o.noiseLpHz ||
                geClassA != o.geClassA || geLoopLpHz != o.geLoopLpHz || geA2 != o.geA2 || dieRiseC != o.dieRiseC ||
@@ -54,10 +57,10 @@ public:
         P = p; fsr = fs; T = 1.0 / fs;
         g = dbToLin(p.gainDb);
         r = kTwoPi * p.flHz;
-        phik = dbToLin(p.satDb) / (kTwoPi * 20.0);
-        qp = p.q * (1.0 + p.asym); qn = p.q * (1.0 - p.asym);
-        if (qp < 1.0) qp = 1.0;
-        if (qn < 1.0) qn = 1.0;
+        vk = dbToLin(p.satDb);                 // the 20 Hz knee level
+        phik = vk / (kTwoPi * 20.0);
+        kCouple = onePoleK(kCoupleTau, fs);
+        kHold = onePoleK(kHoldTau, fs);
         hs.set(FirstOrder::kHighShelf, p.hsHz, fs, p.hsDb);
         hs2.set(FirstOrder::kHighShelf, p.hs2Hz, fs, p.hs2Db);
         lp.set(FirstOrder::kLowPass, p.lpHz, fs);
@@ -79,11 +82,12 @@ public:
     {
         phi = o.phi; hs = o.hs; hs2 = o.hs2; lp = o.lp; lift = o.lift; noiseLp = o.noiseLp; geLp = o.geLp;
         env = o.env; tDie = o.tDie; heat = o.heat; pw = o.pw; caStage = o.caStage;
-        sPrev = P.linear ? phi : sat(phi);
+        peak = o.peak; m2 = o.m2; mP = o.mP;   // the held peak and the two coupling means carry over
+        sPrev = P.linear ? phi : sat(phi, std::fabs(phi) / phik, asymNow());
     }
     void reset()
     {
-        phi = 0.0; sPrev = 0.0;
+        phi = 0.0; sPrev = 0.0; peak = 0.0; m2 = 0.0; mP = 0.0;
         hs.reset(); hs2.reset(); lp.reset(); lift.reset(); noiseLp.reset(); geLp.reset(); caStage.reset();
         env = 0.0; tDie = P.roomC + P.dieRiseC; heat = 0.0; pw = 0.0;
     }
@@ -95,7 +99,9 @@ public:
         else {
             const double uf = P.a3 < 0.0 ? 1.0 / std::sqrt(-3.0 * P.a3) : 1e30;   // beyond the polynomial's fold it clips instead of inverting
             const double uc = u > uf ? uf : (u < -uf ? -uf : u);
-            u = uc + P.a2 * uc * uc + P.a3 * uc * uc * uc;
+            const double u2 = uc * uc;
+            m2 += (u2 - m2) * kCouple;                       // the even term is AC-coupled: its mean does not magnetise the core
+            u = uc + P.a2 * (u2 - m2) + P.a3 * u2 * uc;
             if (P.classA) u = caStage.tick(u);   // CLASS A: the driver module's own terms and ceiling before the core
         }
         double y = P.linear ? linearCore(u) : core(u);
@@ -117,14 +123,16 @@ public:
     }
 
 private:
-    // saturating flux: S(phi) = phi / (1 + |phi / phi_k|^q)^(1/q), a hard ceiling at +-phi_k with knee hardness q. The two polarities
-    // have slightly different hardness (the measured even harmonics peak at the onset of saturation and fade as the drive rises,
-    // which a knee asymmetry does and a flux offset does not).
-    inline double sat(double ph) const
+    // the asymmetry seen by the knee: the onset value divided by a power of the peak flux the core has recently been driven to
+    // (the knee asymmetry fades with the peak flux the core has been driven to, and a fixed-size pulse marks each excursion into
+    // saturation, docs/xfmr-even-fix.md)
+    inline double asymNow() const { return P.asym / std::exp(P.asymP * std::log(peak > kEnvMin ? peak : kEnvMin)); }
+    // saturating flux: S(phi) = phi / (1 + |phi / phi_k|^q)^(1/q), a hard ceiling at +-phi_k; the polarity's hardness is q (1 +- ae)
+    inline double sat(double ph, double az, double ae) const
     {
-        const double az = std::fabs(ph / phik);
         if (az <= 0.02) return ph;
-        const double q = ph > 0.0 ? qp : qn;
+        double q = ph > 0.0 ? P.q * (1.0 + ae) : P.q * (1.0 - ae);
+        if (q < 1.0) q = 1.0;
         const double lz = q * std::log(az);
         if (lz > 700.0) return ph > 0.0 ? phik : -phik;   // far past the ceiling: the exp would overflow to a wrong zero
         return ph / std::exp(std::log1p(std::exp(lz)) / q);
@@ -136,9 +144,19 @@ private:
     inline double core(double v)
     {
         phi += T * (v - r * phi);
-        const double s = sat(phi);
-        const double y = (s - sPrev) * fsr;
+        const double az = std::fabs(phi) / phik;
+        if (az > peak) peak = az; else peak += (az - peak) * kHold;   // the held peak flux, 300 ms release
+        const double s = sat(phi, az, asymNow());
+        double y = (s - sPrev) * fsr;
         sPrev = s;
+        // the saturation pulse: an even-symmetric term of fixed voltage size at each excursion into saturation, DC-blocked
+        double Pz = 0.0;
+        if (az > 0.02) {
+            const double lz = P.q * std::log(az);
+            Pz = lz > 700.0 ? 1.0 : 1.0 / (1.0 + std::exp(-lz));
+        }
+        mP += (Pz - mP) * kCouple;
+        y += P.pulse * vk * (Pz - mP);
         return y;
     }
     inline double linearCore(double v)
@@ -170,8 +188,11 @@ private:
     double noiseLpScale() const { return P.noiseLpHz > 0.0 ? 1.0 / std::sqrt(kPi * P.noiseLpHz / fsr) : 1.0; }
 
     CoreParams P;
-    double fsr = 48000.0, T = 1.0 / 48000.0, g = 1.0, r = 0.0, phik = 0.01, qp = 9.0, qn = 9.0;
-    double phi = 0.0, sPrev = 0.0;
+    static constexpr double kCoupleTau = 0.05;   // s: the driver's even term and the pulse are AC-coupled through this mean
+    static constexpr double kHoldTau = 0.3;      // s: release of the held peak flux
+    static constexpr double kEnvMin = 0.3;       // knee-flux units: the decay's floor (the core is linear below it)
+    double fsr = 48000.0, T = 1.0 / 48000.0, g = 1.0, r = 0.0, phik = 0.01, vk = 1.0, kCouple = 1.0, kHold = 1.0;
+    double phi = 0.0, sPrev = 0.0, peak = 0.0, m2 = 0.0, mP = 0.0;
     FirstOrder hs, hs2, lp, noiseLp, geLp;
     ClassAStage caStage;
     Biquad lift;
@@ -193,6 +214,7 @@ inline CoreParams hwCore(const double* c, int k)
     CoreParams p;
     p.gainDb = c[kc_x_gain_db + k]; p.a2 = c[kc_x_a2 + k]; p.a3 = c[kc_x_a3 + k];
     p.flHz = c[kc_x_fl_hz + k]; p.satDb = c[kc_x_sat_db + k]; p.q = c[kc_x_q + k]; p.asym = c[kc_x_asym + k];
+    p.asymP = c[kc_x_asym_p + k]; p.pulse = c[kc_x_pulse + k];
     p.hsHz = c[kc_x_hs_hz + k]; p.hsDb = c[kc_x_hs_db + k]; p.lpHz = c[kc_x_lp_hz + k];
     return p;
 }
