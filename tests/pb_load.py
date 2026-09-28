@@ -4,7 +4,7 @@
 """Load the bundle with Pedalboard in this process and check the panel against the plugin's own parameter table (src/HVMCParams.hpp,
 read through the C interface build/capi/libhvmc): the 32 input parameters and 7 read-only meters are all there under their names, every
 input parameter offers exactly the panel legends in position order, each defaults to the documented position, and every position of
-every input parameter sets and reads back as its legend (594 positions). Then the plugin's promises to a host: latency 0 in STANDARD and
+every input parameter sets and reads back as its legend (481 positions). Then the plugin's promises to a host: latency 0 in STANDARD and
 39 samples in HQ 2X, and the reported latency is the true delay (in HQ 2X with HARDWIRE BYPASS out, Pedalboard's latency-compensated
 output is the input bit for bit); HARDWIRE BYPASS out and MIX 0 % are bit-transparent in STANDARD; 2 s of noise at 44.1, 48 and 96 kHz
 comes out finite and identical whatever the block size (64, 1024, 8192). On a macOS Audio Unit the meters are checked too: after a tone

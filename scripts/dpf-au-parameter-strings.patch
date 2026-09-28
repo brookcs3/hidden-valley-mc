@@ -5,10 +5,11 @@ DPF's AU wrapper does not publish parameter value names (its own TODO: "scale po
 so AU hosts would show position numbers (0 to 23) where the VST3 shows the panel legends (1 to 24, 1.2:1 / 2:1 / FLOOD, NICKEL / IRON / STEEL, ...).
 This sets kAudioUnitParameterFlag_ValuesHaveStrings on parameters with enumeration values and answers
 kAudioUnitProperty_ParameterValueStrings (indexed parameters), kAudioUnitProperty_ParameterStringFromValue and
-kAudioUnitProperty_ParameterValueFromString from those values.
+kAudioUnitProperty_ParameterValueFromString from those values. It also notifies kAudioUnitProperty_Latency when a parameter change
+alters the plugin's latency (DPF's AU wrapper lists that as a TODO), which QUALITY does.
 
 diff --git a/distrho/src/DistrhoPluginAU.cpp b/distrho/src/DistrhoPluginAU.cpp
-index 919faa71..cc585487 100644
+index 919faa71..1f58e44d 100644
 --- a/distrho/src/DistrhoPluginAU.cpp
 +++ b/distrho/src/DistrhoPluginAU.cpp
 @@ -16,7 +16,6 @@
@@ -161,3 +162,31 @@ index 919faa71..cc585487 100644
         #if 0
          case kAudioUnitProperty_FastDispatch:
              switch (inElement)
+@@ -1612,7 +1723,12 @@ public:
+                     return noErr;
+ 
+                 fLastParameterValues[inElement] = value;
+-                fPlugin.setParameterValue(inElement, value);
++                {
++                    const uint32_t latencyBefore = fPlugin.getLatency();
++                    fPlugin.setParameterValue(inElement, value);
++                    if (fPlugin.getLatency() != latencyBefore)
++                        notifyPropertyListeners(kAudioUnitProperty_Latency, kAudioUnitScope_Global, 0);
++                }
+ 
+                 AudioUnitEvent event;
+                 std::memset(&event, 0, sizeof(event));
+@@ -1809,7 +1925,12 @@ public:
+         if (d_isNotEqual(fLastParameterValues[param], value))
+         {
+             fLastParameterValues[param] = value;
+-            fPlugin.setParameterValue(param, value);
++            {
++                const uint32_t latencyBefore = fPlugin.getLatency();
++                fPlugin.setParameterValue(param, value);
++                if (fPlugin.getLatency() != latencyBefore)
++                    notifyPropertyListeners(kAudioUnitProperty_Latency, kAudioUnitScope_Global, 0);
++            }
+ 
+             // TODO flag param only, notify listeners later on bg thread (sem_post etc)
+             notifyPropertyListeners('DPFp', kAudioUnitScope_Global, param);
