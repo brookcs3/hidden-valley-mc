@@ -63,10 +63,14 @@ echo "== DPF copy for the AU: $(git -C "$PDPF" rev-parse HEAD) + scripts/dpf-au-
 
 # the plugins: DPF's own macOS rules make the bundles, the AU's Info.plist comes from DPF's export tool. The flags go in through the
 # environment, not the make command line, so that src/Makefile still appends its own (-fno-fast-math and -std=gnu++17).
-rm -rf "$OUT/obj" "$OUT/bin/$NAME.vst3" "$OUT/bin/$NAME.component" "$OUT/bin/$NAME.clap"
+rm -rf "$OUT/obj" "$OUT/obj-au" "$OUT/bin/$NAME.vst3" "$OUT/bin/$NAME.component" "$OUT/bin/$NAME.clap"
 CFLAGS="$FLAGS" CXXFLAGS="$FLAGS" LDFLAGS="$FLAGS" \
   make -C "$ROOT/src" -j"$JOBS" DPF_PATH=../build/macos/DPF DPF_BUILD_DIR=../build/macos/obj DPF_TARGET_DIR=../build/macos/bin \
-  PKG_CONFIG=/usr/bin/false
+  PKG_CONFIG=/usr/bin/false HVMC_TARGETS="vst3 clap"
+# the AU in its own pass, without the key input (one input bus in DPF's AU wrapper)
+CFLAGS="$FLAGS" CXXFLAGS="$FLAGS -DHVMC_NO_KEY" LDFLAGS="$FLAGS" \
+  make -C "$ROOT/src" -j"$JOBS" DPF_PATH=../build/macos/DPF DPF_BUILD_DIR=../build/macos/obj-au DPF_TARGET_DIR=../build/macos/bin \
+  PKG_CONFIG=/usr/bin/false HVMC_TARGETS="au"
 VST3="$OUT/bin/$NAME.vst3"; AU="$OUT/bin/$NAME.component"; CLAP="$OUT/bin/$NAME.clap"
 
 # DPF's generic VST3 Info.plist carries DPF's own bundle identifier and version 1.0: give it this plugin's

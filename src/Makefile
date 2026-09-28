@@ -20,9 +20,13 @@ CXXFLAGS += -std=gnu++17 -fno-fast-math -I.
 
 include $(DPF_PATH)/Makefile.plugins.mk
 
-TARGETS += vst3 clap
+# the key (sidechain) input needs a second input bus, which DPF's Audio Unit wrapper does not have: scripts/build-macos.sh builds the
+# VST3 and CLAP with the key and the AU in a second pass with HVMC_TARGETS=au and -DHVMC_NO_KEY
 ifeq ($(MACOS),true)
-TARGETS += au
+HVMC_TARGETS ?= vst3 clap au
+else
+HVMC_TARGETS ?= vst3 clap
 endif
+TARGETS += $(HVMC_TARGETS)
 
 all: $(TARGETS)

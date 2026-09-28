@@ -19,6 +19,11 @@ void hvmc_process(void* e, const float* inL, const float* inR, float* outL, floa
 {
     static_cast<Engine*>(e)->process(inL, inR, outL, outR, n);
 }
+// with an external key (sidechain) input, for KEY IN
+void hvmc_process_key(void* e, const float* inL, const float* inR, const float* keyL, const float* keyR, float* outL, float* outR, int n)
+{
+    static_cast<Engine*>(e)->process(inL, inR, outL, outR, n, keyL, keyR);
+}
 int hvmc_latency(void* e) { return static_cast<Engine*>(e)->latency(); }
 double hvmc_meter(void* e, int outIndex) { return static_cast<Engine*>(e)->meter(outIndex); }
 

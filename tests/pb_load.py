@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Cameron Brooks
 # SPDX-License-Identifier: GPL-3.0-only
 """Load the bundle with Pedalboard in this process and check the panel against the plugin's own parameter table (src/HVMCParams.hpp,
-read through the C interface build/capi/libhvmc): the 34 input parameters and 7 read-only meters are all there under their names, every
+read through the C interface build/capi/libhvmc): the 35 input parameters and 7 read-only meters are all there under their names, every
 input parameter offers exactly the panel legends in position order, each defaults to the documented position, and every position of
 every input parameter sets and reads back as its legend (481 positions). Then the plugin's promises to a host: latency 0 in STANDARD and
 39 samples in HQ 2X, and the reported latency is the true delay (in HQ 2X with HARDWIRE BYPASS out, Pedalboard's latency-compensated

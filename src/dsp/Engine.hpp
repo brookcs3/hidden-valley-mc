@@ -82,7 +82,7 @@ public:
             h.opto.prepare(fi, cal);
             h.disc.prepare(fi, cal); h.disc.seed(0xC1A5 + 613ull * uint64_t(c));
             h.xf.prepare(fi, 0x51ED + 977ull * uint64_t(c));
-            h.up.reset(); h.down.reset();
+            h.up.reset(); h.keyUp.reset(); h.down.reset();
             h.optoIn.set(0.010, fi); h.discIn.set(0.010, fi); h.scfTrim.set(0.015, fi); h.scfTrim.reset(1.0);
             h.caHp.reset(); h.caLp.reset();
             h.vu.prepare(fs); h.grO.prepare(fs); h.grD.prepare(fs);
@@ -113,7 +113,8 @@ public:
     int latency() const { return os == 2 ? kOversampleLatency : 0; }
     int latencyFor(int q) const { return q ? kOversampleLatency : 0; }
 
-    void process(const float* inL, const float* inR, float* outL, float* outR, int n)
+    // keyL / keyR: the external key (sidechain) input, or null when the host has none (KEY IN then hears silence)
+    void process(const float* inL, const float* inR, float* outL, float* outR, int n, const float* keyL = nullptr, const float* keyR = nullptr)
     {
         if (!prepared) prepare(48000.0);
         if (ctl[kGQuality] != quality) prepare(hostFs);   // the resamplers change: restart (the host is told the new latency)
@@ -123,14 +124,16 @@ public:
             // a non-finite or absurd input sample must not poison the stages for the rest of the session
             double x[2] = { double(inL[i]), double(inR[i]) };
             for (int c = 0; c < 2; ++c) { if (!std::isfinite(x[c])) x[c] = 0.0; else if (x[c] > 64.0) x[c] = 64.0; else if (x[c] < -64.0) x[c] = -64.0; }
+            double kx[2] = { keyL ? double(keyL[i]) : 0.0, keyR ? double(keyR[i]) : 0.0 };
+            for (int c = 0; c < 2; ++c) { if (!std::isfinite(kx[c])) kx[c] = 0.0; else if (kx[c] > 64.0) kx[c] = 64.0; else if (kx[c] < -64.0) kx[c] = -64.0; }
             double wet[2];
             if (os == 1) {
-                internal(x, wet);
+                internal(x, wet, kx);
             } else {
-                double u0[2], u1[2], w0[2], w1[2];
-                for (int c = 0; c < 2; ++c) ch[c].up.process(x[c], u0[c], u1[c]);
-                internal(u0, w0);
-                internal(u1, w1);
+                double u0[2], u1[2], w0[2], w1[2], k0[2], k1[2];
+                for (int c = 0; c < 2; ++c) { ch[c].up.process(x[c], u0[c], u1[c]); ch[c].keyUp.process(kx[c], k0[c], k1[c]); }
+                internal(u0, w0, k0);
+                internal(u1, w1, k1);
                 for (int c = 0; c < 2; ++c) wet[c] = ch[c].down.process(w0[c], w1[c]);
             }
             double m = mixS.tick(ctl[kGMix] * 0.01), hw = hwS.tick(ctl[kGHardwire] ? 1.0 : 0.0);
@@ -183,7 +186,7 @@ private:
         OptoStage opto;
         DiscreteStage disc;
         TransformerBlock xf;
-        HalfbandUp up;
+        HalfbandUp up, keyUp;
         HalfbandDown down;
         Smoother optoIn, discIn;
         DecayNoise decay;
@@ -194,15 +197,16 @@ private:
     };
 
     // one sample at the internal rate for both channels
-    inline void internal(const double* x, double* out)
+    inline void internal(const double* x, double* out, const double* key)
     {
+        const bool keyOn = ctl[kGKeyIn] != 0;
         double a[2], ad[2], h[2], wo_[2];
         for (int c = 0; c < 2; ++c) {
             Ch& k = ch[c];
             const double noise = k.uranium ? k.decay.tick() : 0.0;
             double xin = x[c] * caIn;   // CLASS A: the hotter input, ahead of both compressors (1.0 otherwise)
             xin = k.caLp.tick(k.caHp.tick(xin));   // CLASS A input transformer corners (pass-through unless set)
-            const double yo = k.opto.process(xin, noise);
+            const double yo = k.opto.process(xin, noise, keyOn, key[c]);
             const double wo = k.optoIn.tick(optoOn[c] ? 1.0 : 0.0); wo_[c] = wo;
             a[c] = xin + wo * (yo - xin);
             // the discrete stage's input: the inter-stage gain when both stages are in (following the optical crossfade), and the
@@ -210,7 +214,7 @@ private:
             const double gTrim = k.scfTrim.tick(k.disc.filterIn() ? scfLin : 1.0);
             const double gi = wo * interLin + (1.0 - wo) * gTrim;   // the two do not add: with the optical stage in the filter changes nothing here
             ad[c] = a[c] * gi;
-            h[c] = k.disc.sidechain(ad[c]);
+            h[c] = k.disc.sidechain(keyOn ? key[c] : ad[c]);   // KEY IN: the key replaces the detector's own signal, before the filter and the stereo sum
         }
         if (stereo) { const double s = cal[kc_d_link] * (h[0] + h[1]); h[0] = h[1] = s; }
         for (int c = 0; c < 2; ++c) {
@@ -228,7 +232,7 @@ private:
     void recover(int c)
     {
         Ch& h = ch[c];
-        h.opto.reset(); h.disc.reset(); h.xf.reset(); h.up.reset(); h.down.reset();
+        h.opto.reset(); h.disc.reset(); h.xf.reset(); h.up.reset(); h.keyUp.reset(); h.down.reset();
         h.caHp.reset(); h.caLp.reset();
         h.optoIn.reset(optoOn[c] ? 1.0 : 0.0); h.discIn.reset(discOn[c] ? 1.0 : 0.0);
     }

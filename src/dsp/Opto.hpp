@@ -112,7 +112,8 @@ public:
     }
 
     // one sample; `noise` is added at the divider node (material decay noise), in signal units
-    inline double process(double x, double noise = 0.0)
+    // keyOn / key: KEY IN, the sidechain listens to the external key instead of the divider output (the loop is then open)
+    inline double process(double x, double noise = 0.0, bool keyOn = false, double key = 0.0)
     {
         const double g = 1.0 / (1.0 + cond);
         double v = g * x + noise;   // the divider sees the stage input; the amplifier comes after it (docs/opto-ripple-fix.md)
@@ -126,8 +127,9 @@ public:
         }
         gLast = g;
         // sidechain from the divider output (feedback), before the make-up
-        const double hp = sc.tick(v);   // the filter runs either way, so switching it is click-free
-        const double s = cfg.scFilter ? hp : v;
+        const double src = keyOn ? key : v;
+        const double hp = sc.tick(src);   // the filter runs either way, so switching it is click-free
+        const double s = cfg.scFilter ? hp : src;
         const double s2 = scLp.tick(s);   // the sidechain's own low pass, after the high pass
         const double A = dbToLin(thrS.tick(c[kc_o_thr_db + cfg.thr]));
         double d = std::fabs(A * s2);

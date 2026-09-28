@@ -37,6 +37,7 @@ enum GlobalParam {
     kGExhibition,               // OFF / ON
     kGScHpHz,                   // 20 .. 666 Hz: the sidechain high-pass corner when SIDECHAIN FILTER is in (plugin control of the reference)
     kGVuRef,                    // -18 / -14 / -9 dBFS: the sine peak level that reads 0 VU on the OUTPUT meter
+    kGKeyIn,                    // OUT / IN: both detectors listen to the external key (sidechain) input instead of the programme
     kNumInputParams
 };
 
@@ -82,6 +83,7 @@ inline int paramSteps(int index)
     case kGProfile: return 4;
     case kGTemperature: return kTempMax - kTempMin + 1;
     case kGScHpHz: return kScHpMax - kScHpMin + 1;
+    case kGKeyIn: return 2;
     case kGVuRef: return 3;
     }
     return 1;
@@ -116,6 +118,7 @@ inline int paramDefault(int index)
     case kGExhibition: return 0;
     case kGScHpHz: return 90 - kScHpMin;
     case kGVuRef: return 1;
+    case kGKeyIn: return 0;
     }
     return 0;
 }
@@ -149,6 +152,7 @@ inline void positionLabel(int index, int v, char* out, int cap)
     case kGOptoMemory: case kGExhibition: std::snprintf(out, size_t(cap), "%s", onoff[v]); return;
     case kGScHpHz: std::snprintf(out, size_t(cap), "%d", v + kScHpMin); return;
     case kGVuRef: std::snprintf(out, size_t(cap), "%d", int(kVuRefDbfs[v])); return;
+    case kGKeyIn: std::snprintf(out, size_t(cap), "%s", inout[v]); return;
     case kGTemperature: std::snprintf(out, size_t(cap), "%d", v + kTempMin); return;
     default: std::snprintf(out, size_t(cap), "%d", v); return;   // mix 0 .. 100
     }
@@ -160,7 +164,7 @@ inline void paramName(int index, char* out, int cap)
                                 "discrete_attack_ms", "discrete_recover_s", "discrete_gain", "sidechain_filter", "transformer",
                                 "meter_select" };
     static const char* gl[] = { "stereo", "hardwire_bypass", "mix_percent", "profile", "quality", "opto_memory", "temperature_c",
-                                "exhibition", "sidechain_hp_hz", "vu_reference_dbfs" };
+                                "exhibition", "sidechain_hp_hz", "vu_reference_dbfs", "key_in" };
     static const char* outs[] = { "L_meter_db", "L_gr_optical_db", "L_gr_discrete_db", "R_meter_db", "R_gr_optical_db",
                                   "R_gr_discrete_db", "magic_eye_db" };
     if (index < 2 * kPerChannel) { std::snprintf(out, size_t(cap), "%s_%s", index < kPerChannel ? "L" : "R", ch[index % kPerChannel]); return; }
@@ -196,6 +200,7 @@ inline const char* paramDescription(int index)
     case kGTemperature: return "Room temperature for the material positions (15-45 C physical, above that an exhibition range)";
     case kGExhibition: return "Exhibition scale for sub-audible material effects (off = true physical scale)";
     case kGScHpHz: return "Sidechain high-pass corner in Hz, first order, both detectors, when SIDECHAIN FILTER is in (the hardware's fixed 90 Hz is the default)";
+    case kGKeyIn: return "KEY IN: both detectors listen to the external sidechain input instead of the programme (with nothing connected they do not compress; the Audio Unit has no key input)";
     case kGVuRef: return "VU reference: the sine peak level in dBFS that reads 0 VU on the OUTPUT meter (-14 = 0 dBu at +14 dBu full scale)";
     case kOMeterL: return "Left meter as METER SELECT shows it: optical or discrete gain reduction (dB, negative) or output VU (0 VU = -14 dBFS peak sine)";
     case kOGrOpticalL: return "Left optical gain reduction, dB (negative), ballistic like the panel meter";

@@ -13,6 +13,7 @@
 //  6. compression sanity: threshold up gives more gain reduction, and the meter reads it;
 //  7. click test: stepping ratio, transformer and bypass switches while noise plays stays bounded;
 //  8. transformer ceiling: a 20 Hz tone at +18 dBFS comes out limited (the flux ceiling), a 1 kHz tone does not;
+// 10. KEY IN: a silent key stops the compression, a loud key compresses a quiet programme;
 //  9. robustness: NaN, Inf and absurd input samples leave the engine finite and working, and the bypass stays transparent.
 // Also writes <out_dir>/cpp_reference.json (a few renders' RMS figures) for tests/crosscheck.py.
 #include <cstdio>
@@ -231,6 +232,21 @@ int main(int argc, char** argv)
         bool clean = true;
         for (size_t i = 0; i < t.size(); ++i) if (i != 10 && ob.l[i] != t[i]) { clean = false; break; }
         report("HARDWIRE OUT stays bit-transparent after a NaN sample (the NaN itself becomes 0)", clean && ob.l[10] == 0.0f, clean ? "identical elsewhere" : "differs");
+    }
+
+    // 10. KEY IN: with a silent key nothing compresses; with a loud key a quiet programme is compressed by it
+    {
+        std::vector<float> loud = sine(-10.0, 1000.0, 2.0, fs), quiet = sine(-40.0, 1000.0, 2.0, fs), none(loud.size(), 0.0f);
+        auto render = [&](const std::vector<float>& prog, const std::vector<float>& key, int keyIn) {
+            Engine e; e.setParam(kPOpticalThreshold, 19); e.setParam(kPDiscreteThreshold, 15); e.setParam(kGKeyIn, keyIn); e.setParam(kGStereo, 1); e.prepare(fs);
+            std::vector<float> l(prog.size()), r(prog.size());
+            e.process(prog.data(), prog.data(), l.data(), r.data(), int(prog.size()), key.data(), key.data());
+            return rmsDb(l, size_t(fs)) - rmsDb(prog, size_t(fs));
+        };
+        const double own = render(loud, none, 0), silentKey = render(loud, none, 1), noGr = render(quiet, none, 0), keyed = render(quiet, loud, 1);
+        std::snprintf(buf, sizeof buf, "loud programme: own sidechain %+.2f dB, silent key %+.2f dB; quiet programme: %+.2f dB alone, %+.2f dB keyed by a loud key",
+                      own, silentKey, noGr, keyed);
+        report("KEY IN replaces the detectors' signal", silentKey > own + 5.0 && keyed < noGr - 5.0 && std::fabs(silentKey - noGr) < 1.0, buf);
     }
 
     // cpp_reference.json for the Python cross-check

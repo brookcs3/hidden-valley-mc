@@ -16,7 +16,11 @@
 
 #define DISTRHO_PLUGIN_HAS_UI        0
 #define DISTRHO_PLUGIN_IS_RT_SAFE    1
-#define DISTRHO_PLUGIN_NUM_INPUTS    2
+#if defined(HVMC_NO_KEY)
+#define DISTRHO_PLUGIN_NUM_INPUTS    2   // the Audio Unit: DPF's AU wrapper has one input bus, so no key input
+#else
+#define DISTRHO_PLUGIN_NUM_INPUTS    4   // programme L/R, then the key (sidechain) L/R
+#endif
 #define DISTRHO_PLUGIN_NUM_OUTPUTS   2
 #define DISTRHO_PLUGIN_WANT_PROGRAMS 0
 #define DISTRHO_PLUGIN_WANT_STATE    0

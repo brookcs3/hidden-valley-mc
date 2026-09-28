@@ -45,6 +45,13 @@ protected:
 
     void initAudioPort(bool input, uint32_t index, AudioPort& port) override
     {
+        if (input && index >= 2) {   // the key (sidechain) pair
+            port.hints = kAudioPortIsSidechain;
+            port.name = index == 2 ? "Key In L" : "Key In R";
+            port.symbol = index == 2 ? "key_in_l" : "key_in_r";
+            port.groupId = kPortGroupNone;
+            return;
+        }
         port.groupId = kPortGroupStereo;
         Plugin::initAudioPort(input, index, port);
     }
@@ -122,7 +129,11 @@ protected:
     {
         const hvmc::DenormalGuard guard;
         if (fDirty.exchange(false)) pushControls();
+#if DISTRHO_PLUGIN_NUM_INPUTS == 4
+        fEngine->process(inputs[0], inputs[1], outputs[0], outputs[1], int(frames), inputs[2], inputs[3]);
+#else
         fEngine->process(inputs[0], inputs[1], outputs[0], outputs[1], int(frames));
+#endif
         for (int i = hvmc::kNumInputParams; i < hvmc::kNumParams; ++i) {
             double m = fEngine->meter(i);
             const double hi = i == hvmc::kOMagicEye ? 0.0 : 20.0;   // each output stays inside its declared range

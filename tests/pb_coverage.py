@@ -25,7 +25,7 @@ CH = {"optical": 1, "optical_threshold": 17, "optical_gain": 10, "discrete": 1, 
       "discrete_attack_ms": 2, "discrete_recover_s": 2, "discrete_gain": 6, "sidechain_filter": 1, "transformer": 0, "meter_select": 2}
 BASE = {**{f"l_{k}": v for k, v in CH.items()}, **{f"r_{k}": v for k, v in CH.items()},
         "stereo": 0, "hardwire_bypass": 1, "mix_percent": 100, "profile": 1, "quality": 0, "opto_memory": 0, "temperature_c": 10, "exhibition": 0,
-        "sidechain_hp_hz": 70, "vu_reference_dbfs": 1}
+        "sidechain_hp_hz": 70, "vu_reference_dbfs": 1, "key_in": 0}
 IRON, URANIUM, GERMANIUM = 1, 4, 5
 # {parameter: (positions or "all", context that makes it live or None, reason)}
 NEUTRAL = {
