@@ -18,7 +18,7 @@ public:
     HiddenValleyPlugin()
         : Plugin(hvmc::kNumParams, 0, 0)
     {
-        for (int i = 0; i < hvmc::kNumInputParams; ++i) fValues[i] = float(hvmc::paramDefault(i));
+        for (int i = 0; i < hvmc::kNumInputParams; ++i) fValues[i] = float(hvmc::paramDefault(i) + hvmc::hostOffset(i));
         for (int i = hvmc::kNumInputParams; i < hvmc::kNumParams; ++i) fValues[i] = 0.0f;
         fEngine = new hvmc::Engine();
         fDirty.store(true);
@@ -69,9 +69,11 @@ protected:
         const int steps = hvmc::paramSteps(int(index));
         p.hints = kParameterIsAutomatable | kParameterIsInteger;
         if (steps == 2) p.hints |= kParameterIsBoolean;
-        p.ranges.min = 0.0f;
-        p.ranges.max = float(steps - 1);
-        p.ranges.def = float(hvmc::paramDefault(int(index)));
+        const int off = hvmc::hostOffset(int(index));
+        p.ranges.min = float(off);
+        p.ranges.max = float(off + steps - 1);
+        p.ranges.def = float(off + hvmc::paramDefault(int(index)));
+        if (steps > 255) return;   // declared in its own unit (hertz), no enumeration: DPF's enumeration count is 8-bit
         ParameterEnumerationValue* ev = new ParameterEnumerationValue[steps];
         for (int v = 0; v < steps; ++v) {
             hvmc::positionLabel(int(index), v, buf, sizeof(buf));
@@ -92,10 +94,10 @@ protected:
     void setParameterValue(uint32_t index, float value) override
     {
         if (index >= uint32_t(hvmc::kNumInputParams)) return;   // meters are read-only
-        const int steps = hvmc::paramSteps(int(index));
+        const int steps = hvmc::paramSteps(int(index)), off = hvmc::hostOffset(int(index));
         float v = std::round(value);
-        if (v < 0.0f) v = 0.0f;
-        if (v > float(steps - 1)) v = float(steps - 1);
+        if (v < float(off)) v = float(off);
+        if (v > float(off + steps - 1)) v = float(off + steps - 1);
         if (v != fValues[index].load(std::memory_order_relaxed)) {
             fValues[index].store(v, std::memory_order_relaxed);
             fDirty.store(true);
@@ -133,7 +135,7 @@ protected:
 private:
     void pushControls()
     {
-        for (int i = 0; i < hvmc::kNumInputParams; ++i) fEngine->setParam(i, int(fValues[i].load(std::memory_order_relaxed)));
+        for (int i = 0; i < hvmc::kNumInputParams; ++i) fEngine->setParam(i, int(fValues[i].load(std::memory_order_relaxed)) - hvmc::hostOffset(i));
     }
 
     std::atomic<float> fValues[hvmc::kNumParams];   // written by the host's thread and by run(), read by both

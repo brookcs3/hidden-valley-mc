@@ -30,10 +30,10 @@ struct VuMeter {
     double value = 0.0;
     void prepare(double fs) { n.prepare(fs); value = 0.0; }
     inline void tick(double x) { value = n.tick(std::fabs(x)); }
-    // VU: average-responding, sine-calibrated (mean |sin| = 2/pi of the peak), 0 VU = -14 dBFS peak
-    double vu() const
+    // VU: average-responding, sine-calibrated (mean |sin| = 2/pi of the peak); 0 VU = a sine of refDbfs peak (default -14 dBFS)
+    double vu(double refDbfs = -14.0) const
     {
-        static const double ref = 0.6366197723675814 * 0.19952623149688797;   // (2/pi) * 10^(-14/20)
+        const double ref = 0.6366197723675814 * dbToLin(refDbfs);
         return linToDb((value > 1e-12 ? value : 1e-12) / ref);
     }
 };

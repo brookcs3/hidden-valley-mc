@@ -35,6 +35,7 @@ namespace hvmc {
 struct OptoConfig {
     int thr = 0, gain = 10;          // switch positions 0..23
     bool scFilter = true;
+    double scHz = 0.0;            // sidechain high-pass corner (0: the calibration's sc_hz)
     bool memory = false;
     bool hwUnit = false;             // Measured Unit profile
     double lightGain = 1.0;          // material: multiplies the light
@@ -50,7 +51,7 @@ public:
     void prepare(double fs, const double* cal)
     {
         fsr = fs; c = cal;
-        sc.set(FirstOrder::kHighPass, c[kc_sc_hz], fs);
+        sc.set(FirstOrder::kHighPass, cfg.scHz > 0.0 ? cfg.scHz : c[kc_sc_hz], fs);
         kEl = onePoleK(c[kc_o_tau_el], fs);
         for (int s = 0; s < kOptoStates; ++s) kAtt[s] = onePoleK(c[kc_o_tatt + s], fs);
         kMemAtt = onePoleK(c[kc_o_tatt + 1], fs); kMemRel = onePoleK(c[kc_o_mem_trel], fs); kMem = onePoleK(c[kc_o_mem_tm], fs);
@@ -87,6 +88,7 @@ public:
                 n1 = kTh > 0.0 ? src / kTh : 0.0; n2 = kPa > 0.0 ? src / kPa : 0.0; n3 = kU > 0.0 ? src / kU : 0.0;
             }
         }
+        if (c && nc.scHz != cfg.scHz) sc.set(FirstOrder::kHighPass, nc.scHz > 0.0 ? nc.scHz : c[kc_sc_hz], fsr);   // retune, state kept
         cfg = nc; configured = true;
         kEl2 = cfg.tauEl2 > 0.0 ? onePoleK(cfg.tauEl2, fsr) : 1.0;
         leakTarget = leakFor();

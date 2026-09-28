@@ -11,7 +11,7 @@ context makes it live (another transformer, exhibition scale), live there:
   meter_select: routes the meter output only;  profile REFERENCE = HARDWARE with Nickel (HARDWARE adds only Iron's low-frequency lift
   and noise), live with Iron;  exhibition: scales the sub-audible material effects, so nothing to scale with a hardware core, live with
   Uranium;  temperature_c: acts on the material positions (Germanium leakage and bias, Plutonium's thermistor, Uranium's winding heat),
-  nothing with Nickel, live with Germanium. (opto_memory is audible on the burst already.) In STEREO the two channels are identical
+  nothing with Nickel, live with Germanium;  vu_reference_dbfs: offsets the OUTPUT meter reading only. (opto_memory is audible on the burst already.) In STEREO the two channels are identical
   except with Iron, whose noise generator is seeded per channel.
 usage: python3 tests/pb_coverage.py [bundle] [out.json] [--survey]   (--survey only lists what is neutral, and passes)"""
 import json, os, sys, time
@@ -24,7 +24,8 @@ FS = 48000
 CH = {"optical": 1, "optical_threshold": 17, "optical_gain": 10, "discrete": 1, "discrete_threshold": 15, "discrete_ratio": 2,
       "discrete_attack_ms": 2, "discrete_recover_s": 2, "discrete_gain": 6, "sidechain_filter": 1, "transformer": 0, "meter_select": 2}
 BASE = {**{f"l_{k}": v for k, v in CH.items()}, **{f"r_{k}": v for k, v in CH.items()},
-        "stereo": 0, "hardwire_bypass": 1, "mix_percent": 100, "profile": 1, "quality": 0, "opto_memory": 0, "temperature_c": 10, "exhibition": 0}
+        "stereo": 0, "hardwire_bypass": 1, "mix_percent": 100, "profile": 1, "quality": 0, "opto_memory": 0, "temperature_c": 10, "exhibition": 0,
+        "sidechain_hp_hz": 70, "vu_reference_dbfs": 1}
 IRON, URANIUM, GERMANIUM = 1, 4, 5
 # {parameter: (positions or "all", context that makes it live or None, reason)}
 NEUTRAL = {
@@ -33,7 +34,9 @@ NEUTRAL = {
     "profile": ([0], {"l_transformer": IRON, "r_transformer": IRON}, "REFERENCE differs from HARDWARE only through Iron's low-frequency lift and noise"),
     "exhibition": ("all", {"l_transformer": URANIUM, "r_transformer": URANIUM}, "scales sub-audible material effects; a hardware core has none"),
     "temperature_c": ("all", {"l_transformer": GERMANIUM, "r_transformer": GERMANIUM}, "acts on the material positions only"),
+    "vu_reference_dbfs": ("all", None, "offsets the OUTPUT meter reading only"),
 }
+STRIDE = {"sidechain_hp_hz": 25}   # sample the 647-step corner
 
 def signal(secs=1.5, fs=FS):
     t = np.arange(int(secs * fs)) / fs
@@ -70,7 +73,7 @@ def main():
         side = "l" if name.startswith("l_") else "r" if name.startswith("r_") else "g"
         doc = NEUTRAL.get(name); doc_pos = set(range(steps)) if doc and doc[0] == "all" else set(doc[0]) if doc else set()
         live, quiet = [], []
-        for pos in range(steps):
+        for pos in range(0, steps, STRIDE.get(name, 1)):
             if pos == BASE[name]: continue
             y = R.render({name: pos})
             dl, dr = float(np.max(np.abs(y[0] - base[0]))), float(np.max(np.abs(y[1] - base[1])))

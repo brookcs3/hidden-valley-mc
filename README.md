@@ -10,7 +10,7 @@ The name is a nod. Hidden Valley Mastering Compressor is not affiliated with, en
 - **Three transformers as flux-domain cores, not EQ curves.** NICKEL, IRON and STEEL each integrate the signal into flux, saturate it against a hard ceiling with their own knee hardness and asymmetry, and differentiate it back, behind a driver with its own even and odd terms; IRON carries the extra Class-A stage the hardware has. Low frequencies at high level hit the ceiling, 1 kHz does not, and the harmonic spectra follow the reference's across a grid of ten frequencies and thirteen levels.
 - **Four material positions that could not be built.** GOLD (an Au4Mn core, Curie point 385 K, a gold-flash window on the cell), URANIUM (a UFe10Si2 core, uranyl-glass persistence, a release that follows the U-238 decay chain, alpha-decay rumble), GERMANIUM (alloy-junction Class-A stage with its thermal bias walk, leaky detector) and PLUTONIUM (a nickel core behind delta-Pu windings with an NTC bloom). Each is derived from the material's real properties at true physical scale, where most of the effects are inaudible, with an EXHIBITION switch that scales them up and a TEMPERATURE control from 15 to 120 C. `docs/MATERIALS.md` keeps the ledger of what is physical and what is exaggerated.
 - **Four calibration profiles.** REFERENCE reproduces the commercial plug-in for null tests. HARDWARE (the default) adds the uncontested hardware evidence, Iron's low-frequency lift and noise floor. MEASURED UNIT adds one torn-down unit's contested data: an 18 kHz pole in the optical path, an HF loss that grows with optical gain reduction, and that unit's mis-trimmed VCA at H2 −50 dBc. CLASS A is a derived all-Class-A signal path for the original Model 1 and Providence editions: a hotter input, single-ended module terms and soft ceilings borrowed from the fitted Iron stage and from the Pye 4060's published limits, with every number labelled derived, borrowed or estimated in `docs/class-a-profile.md`.
-- **Every front-panel control, stepped like the hardware, for both channels.** Per channel: OPTICAL in/out, threshold and gain (24 positions each), DISCRETE in/out, threshold (24), ratio (1.2:1 to FLOOD), attack (0.1 to 30 ms), recover (0.1 s to DUAL), gain (24), SIDECHAIN FILTER, TRANSFORMER and METER SELECT; then STEREO / DUAL MONO, HARDWIRE BYPASS, and the plugin's own MIX, PROFILE, QUALITY, OPTO MEMORY, TEMPERATURE and EXHIBITION. That is 32 automatable parameters, each showing the panel's own legends, plus seven read-only meter outputs.
+- **Every front-panel control, stepped like the hardware, for both channels.** Per channel: OPTICAL in/out, threshold and gain (24 positions each), DISCRETE in/out, threshold (24), ratio (1.2:1 to FLOOD), attack (0.1 to 30 ms), recover (0.1 s to DUAL), gain (24), SIDECHAIN FILTER, TRANSFORMER and METER SELECT; then STEREO / DUAL MONO, HARDWIRE BYPASS, and the plugin's own MIX, PROFILE, QUALITY, OPTO MEMORY, TEMPERATURE, EXHIBITION, SIDECHAIN HP and VU REFERENCE. That is 34 automatable parameters, each showing the panel's own legends (the sidechain corner is a number in hertz), plus seven read-only meter outputs.
 - **Zero latency in STANDARD, 39 samples in HQ 2X.** STANDARD runs the whole model at the host rate with no oversampling, as the reference does. HQ 2X runs it at twice the rate behind a 79-tap half-band pair and reports its latency to the host.
 
 ## Install
@@ -135,18 +135,20 @@ That is the manufacturer's suggested mastering direction (a little optical, a li
 | 29 | `opto_memory` | OFF / ON | OFF | Opto light memory: the CdS cell's release lengthens after long, deep compression (off matches the reference) |
 | 30 | `temperature_c` | 15 to 120 (106 steps) | 25 | Room temperature for the material positions (15-45 C physical, above that an exhibition range) |
 | 31 | `exhibition` | OFF / ON | OFF | Exhibition scale for sub-audible material effects (off = true physical scale) |
+| 32 | `sidechain_hp_hz` | 20 to 666 (647 steps) | 90 | Sidechain high-pass corner in Hz, first order, both detectors, when SIDECHAIN FILTER is in (the hardware's fixed 90 Hz is the default) |
+| 33 | `vu_reference_dbfs` | -18 / -14 / -9 | -14 | VU reference: the sine peak level in dBFS that reads 0 VU on the OUTPUT meter (-14 = 0 dBu at +14 dBu full scale) |
 
 Read-only outputs (the host shows them as meters):
 
 | # | output | what it reads |
 |---|---|---|
-| 32 | `L_meter_db` | Left meter as METER SELECT shows it: optical or discrete gain reduction (dB, negative) or output VU (0 VU = -14 dBFS peak sine) |
-| 33 | `L_gr_optical_db` | Left optical gain reduction, dB (negative), ballistic like the panel meter |
-| 34 | `L_gr_discrete_db` | Left discrete gain reduction, dB (negative), ballistic like the panel meter |
-| 35 | `R_meter_db` | Right meter as METER SELECT shows it (see L_meter_db) |
-| 36 | `R_gr_optical_db` | Right optical gain reduction, dB (negative) |
-| 37 | `R_gr_discrete_db` | Right discrete gain reduction, dB (negative) |
-| 38 | `magic_eye_db` | Mono output peak in dBFS, the signal the magic-eye tube follows |
+| 34 | `L_meter_db` | Left meter as METER SELECT shows it: optical or discrete gain reduction (dB, negative) or output VU (0 VU = -14 dBFS peak sine) |
+| 35 | `L_gr_optical_db` | Left optical gain reduction, dB (negative), ballistic like the panel meter |
+| 36 | `L_gr_discrete_db` | Left discrete gain reduction, dB (negative), ballistic like the panel meter |
+| 37 | `R_meter_db` | Right meter as METER SELECT shows it (see L_meter_db) |
+| 38 | `R_gr_optical_db` | Right optical gain reduction, dB (negative) |
+| 39 | `R_gr_discrete_db` | Right discrete gain reduction, dB (negative) |
+| 40 | `magic_eye_db` | Mono output peak in dBFS, the signal the magic-eye tube follows |
 
 The discrete stage's ratio legends are nominal: each position is a fixed, progressive curve of gain reduction against level fitted to the reference, and 4:1 and FLOOD over-compress (the 2008 manual calls FLOOD 20:1; current dealer copy lists the same position as 10:1 and DUAL as AUTO). The optical stage's nominal 2:1 measures as about 2.6:1.
 
@@ -165,7 +167,7 @@ Measured on the macOS build through Pedalboard 0.9.21 on the `arm64` VST3 and Au
 
 - **It is a model of a model, plus hardware data.** Every dynamic and static behaviour is fitted to measurements of the commercial plug-in model of the unit (version 1.5.1) and the profiles add published hardware evidence; no unit was on the bench for this version. `docs/MODEL.md` section 8 lists what is measured, what is assumed and what is invented.
 - **Known residuals.** The optical stage's fifth harmonic under gain reduction is within about 3 dB of the reference's and its fourth-kilohertz rows at 48 kHz are aliasing of the light pulse (HQ 2X removes it); the transformer cores' onset burst of even harmonics is matched to about 6 dB rms, with the 120 and 160 Hz points at +21 dBFS at the foot of the reference's output ceiling the worst; the discrete detector's attack differs slightly between ratio positions in the reference (FLOOD in particular), which the model carries as hooks not yet fitted. Each is tracked in `FUTURE_WORK.md`.
-- **Not modelled.** The reference's output ceiling near +22 dBFS (+36 dBu), its softening above +20 dBFS, its external key input and its variable sidechain corner (the filter here is the hardware's fixed 90 Hz, first order), and its VU reference switch. The Class A and Providence editions of the hardware have no measurements; the CLASS A profile is derived, not fitted, and says so.
+- **Not modelled.** The reference's output ceiling near +22 dBFS (+36 dBu), its softening above +20 dBFS, and its external key input. The reference's variable sidechain corner and VU reference are both here (`sidechain_hp_hz`, 20 to 666 Hz, within 0.11 dB of the reference's at 200 and 400 Hz; `vu_reference_dbfs`). The Class A and Providence editions of the hardware have no measurements; the CLASS A profile is derived, not fitted, and says so.
 - **Standard mode is not oversampled**, as the reference is not; harmonics above Nyquist alias at 44.1 and 48 kHz in both. HQ 2X halves that at the cost of 39 samples of latency.
 
 ## Repository layout

@@ -35,6 +35,8 @@ enum GlobalParam {
     kGOptoMemory,               // OFF / ON
     kGTemperature,              // 15 .. 120 C
     kGExhibition,               // OFF / ON
+    kGScHpHz,                   // 20 .. 666 Hz: the sidechain high-pass corner when SIDECHAIN FILTER is in (plugin control of the reference)
+    kGVuRef,                    // -18 / -14 / -9 dBFS: the sine peak level that reads 0 VU on the OUTPUT meter
     kNumInputParams
 };
 
@@ -54,8 +56,13 @@ enum Profile { kProfileReference, kProfileHardware, kProfileMeasuredUnit, kProfi
 enum MeterSelect { kMeterOptical, kMeterDiscrete, kMeterOutput };
 
 static constexpr int kTempMin = 15, kTempMax = 120, kTempDefault = 25;
+static constexpr int kScHpMin = 20, kScHpMax = 666;
+static constexpr double kVuRefDbfs[3] = { -18.0, -14.0, -9.0 };
 
 inline bool isOutput(int index) { return index >= kNumInputParams; }
+// a parameter declared to the host in its own unit rather than as an enumeration (DPF's enumeration count is 8-bit): the host value is
+// the position plus this offset
+inline int hostOffset(int index) { return index == kGScHpHz ? kScHpMin : 0; }
 
 // number of positions of an input parameter
 inline int paramSteps(int index)
@@ -74,6 +81,8 @@ inline int paramSteps(int index)
     case kGMix: return 101;
     case kGProfile: return 4;
     case kGTemperature: return kTempMax - kTempMin + 1;
+    case kGScHpHz: return kScHpMax - kScHpMin + 1;
+    case kGVuRef: return 3;
     }
     return 1;
 }
@@ -105,6 +114,8 @@ inline int paramDefault(int index)
     case kGOptoMemory: return 0;
     case kGTemperature: return kTempDefault - kTempMin;
     case kGExhibition: return 0;
+    case kGScHpHz: return 90 - kScHpMin;
+    case kGVuRef: return 1;
     }
     return 0;
 }
@@ -136,6 +147,8 @@ inline void positionLabel(int index, int v, char* out, int cap)
     case kGProfile: std::snprintf(out, size_t(cap), "%s", profiles[v]); return;
     case kGQuality: std::snprintf(out, size_t(cap), "%s", v ? "HQ 2X" : "STANDARD"); return;
     case kGOptoMemory: case kGExhibition: std::snprintf(out, size_t(cap), "%s", onoff[v]); return;
+    case kGScHpHz: std::snprintf(out, size_t(cap), "%d", v + kScHpMin); return;
+    case kGVuRef: std::snprintf(out, size_t(cap), "%d", int(kVuRefDbfs[v])); return;
     case kGTemperature: std::snprintf(out, size_t(cap), "%d", v + kTempMin); return;
     default: std::snprintf(out, size_t(cap), "%d", v); return;   // mix 0 .. 100
     }
@@ -147,7 +160,7 @@ inline void paramName(int index, char* out, int cap)
                                 "discrete_attack_ms", "discrete_recover_s", "discrete_gain", "sidechain_filter", "transformer",
                                 "meter_select" };
     static const char* gl[] = { "stereo", "hardwire_bypass", "mix_percent", "profile", "quality", "opto_memory", "temperature_c",
-                                "exhibition" };
+                                "exhibition", "sidechain_hp_hz", "vu_reference_dbfs" };
     static const char* outs[] = { "L_meter_db", "L_gr_optical_db", "L_gr_discrete_db", "R_meter_db", "R_gr_optical_db",
                                   "R_gr_discrete_db", "magic_eye_db" };
     if (index < 2 * kPerChannel) { std::snprintf(out, size_t(cap), "%s_%s", index < kPerChannel ? "L" : "R", ch[index % kPerChannel]); return; }
@@ -182,6 +195,8 @@ inline const char* paramDescription(int index)
     case kGOptoMemory: return "Opto light memory: the CdS cell's release lengthens after long, deep compression (off matches the reference)";
     case kGTemperature: return "Room temperature for the material positions (15-45 C physical, above that an exhibition range)";
     case kGExhibition: return "Exhibition scale for sub-audible material effects (off = true physical scale)";
+    case kGScHpHz: return "Sidechain high-pass corner in Hz, first order, both detectors, when SIDECHAIN FILTER is in (the hardware's fixed 90 Hz is the default)";
+    case kGVuRef: return "VU reference: the sine peak level in dBFS that reads 0 VU on the OUTPUT meter (-14 = 0 dBu at +14 dBu full scale)";
     case kOMeterL: return "Left meter as METER SELECT shows it: optical or discrete gain reduction (dB, negative) or output VU (0 VU = -14 dBFS peak sine)";
     case kOGrOpticalL: return "Left optical gain reduction, dB (negative), ballistic like the panel meter";
     case kOGrDiscreteL: return "Left discrete gain reduction, dB (negative), ballistic like the panel meter";

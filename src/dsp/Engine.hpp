@@ -165,7 +165,7 @@ public:
             const int sel = ctl[c == 0 ? kPMeterSelect : kPerChannel + kPMeterSelect];
             if (sel == kMeterOptical) return -h.grO.last;
             if (sel == kMeterDiscrete) return -h.grD.last;
-            return h.vu.vu();
+            return h.vu.vu(kVuRefDbfs[ctl[kGVuRef]]);
         }
         case kOGrOpticalL: case kOGrOpticalR: return -h.grO.last;
         case kOGrDiscreteL: case kOGrDiscreteR: return -h.grD.last;
@@ -256,6 +256,8 @@ private:
             auto P = [&](int p) { return ctl[src * kPerChannel + p]; };
             const int xfmr = P(kPTransformer);
             OptoConfig oc;
+            const double scHz = cal[kc_sc_hz] * double(ctl[kGScHpHz] + kScHpMin) / 90.0;   // the fit's corner is the reference's 90 Hz setting
+            oc.scHz = scHz;
             oc.thr = P(kPOpticalThreshold); oc.gain = P(kPOpticalGain); oc.scFilter = P(kPSidechainFilter) != 0;
             oc.memory = ctl[kGOptoMemory] != 0; oc.hwUnit = profile == kProfileMeasuredUnit;
             oc.classA = classA; oc.ca = ca;
@@ -263,6 +265,7 @@ private:
             if (xfmr == kUranium) { oc.tauEl2 = mat::kUraniumTauEl2; oc.halfLife = true; }
             ch[c].opto.configure(oc);
             DiscreteConfig dc;
+            dc.scHz = scHz;
             dc.thr = P(kPDiscreteThreshold); dc.ratio = P(kPDiscreteRatio); dc.attack = P(kPDiscreteAttack);
             dc.recover = P(kPDiscreteRecover); dc.gain = P(kPDiscreteGain); dc.scFilter = P(kPSidechainFilter) != 0;
             dc.hwUnit = profile == kProfileMeasuredUnit;

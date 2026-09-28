@@ -132,6 +132,7 @@ int main(int argc, char** argv)
             for (int v = 0; v < paramSteps(p); ++v) {
                 if (p == kGTemperature && v % 15 != 0) continue;
                 if (p == kGMix && v % 25 != 0) continue;
+                if (p == kGScHpHz && v % 100 != 0) continue;   // sample the sidechain corner
                 Engine e; e.setParam(kPOpticalThreshold, 17); e.setParam(kPDiscreteThreshold, 15); e.setParam(p, v); e.prepare(fs);
                 Render o = run(e, s, s);
                 float pk1, pk2; const bool ok = finite(o.l, &pk1) && finite(o.r, &pk2);

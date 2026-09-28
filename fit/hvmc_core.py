@@ -15,7 +15,8 @@ _LIB = None
 def lib():
     global _LIB
     if _LIB is None:
-        for name in ("libhvmc.dylib", "libhvmc.so", "hvmc.dll"):
+        names = {"darwin": ("libhvmc.dylib",), "win32": ("hvmc.dll",)}.get(sys.platform, ("libhvmc.so",))   # the shared build/ may hold other platforms' libraries
+        for name in names:
             p = os.path.join(ROOT, "build", "capi", name)
             if os.path.exists(p):
                 _LIB = ctypes.CDLL(p)

@@ -28,6 +28,7 @@ namespace hvmc {
 struct DiscreteConfig {
     int thr = 0, ratio = 0, attack = 5, recover = 0, gain = 6;
     bool scFilter = true;
+    double scHz = 0.0;            // sidechain high-pass corner (0: the calibration's sc_hz)
     bool hwUnit = false;
     double leakRatio = 0.0;      // material (germanium): detector leakage against the release conductance
     double a2Extra = 0.0;        // material (germanium): gain-cell mismatch, even order, per 10 dB of gain reduction
@@ -68,7 +69,7 @@ public:
     void prepare(double fs, const double* cal)
     {
         fsr = fs; c = cal;
-        sc.set(FirstOrder::kHighPass, c[kc_sc_hz], fs);
+        sc.set(FirstOrder::kHighPass, cfg.scHz > 0.0 ? cfg.scHz : c[kc_sc_hz], fs);
         for (int r = 0; r < kRatios; ++r) curves[r].build(c + kc_d_curve + r * kCurveN);
         floorDb = c[kc_d_floor_db];
         floorLin = dbToLin(floorDb);
@@ -99,6 +100,7 @@ public:
             else { prevRatio = cfg.ratio; fadePos = 0; }
         }
         if (!first && nc.recover != cfg.recover) w = g;   // the second node starts level with the first when DUAL is switched
+        if (c && nc.scHz != cfg.scHz) sc.set(FirstOrder::kHighPass, nc.scHz > 0.0 ? nc.scHz : c[kc_sc_hz], fsr);   // retune, state kept
         cfg = nc; configured = true;
         setTimes();
         caStage.set(cfg.ca); noiseAmp = cfg.classA && cfg.noiseDb > -300.0 ? dbToLin(cfg.noiseDb) : 0.0;
