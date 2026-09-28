@@ -32,7 +32,9 @@ public:
     {
         env += (std::fabs(u) - env) * kEnv;
         const double a2 = P.a2 * (1.0 + P.a2Env * env);
-        return u + a2 * u * u + P.a3 * u * u * u;
+        const double uf = P.a3 < 0.0 ? 1.0 / std::sqrt(-3.0 * P.a3) : 1e30;   // clip at the polynomial's fold rather than invert
+        const double uc = u > uf ? uf : (u < -uf ? -uf : u);
+        return uc + a2 * uc * uc + P.a3 * uc * uc * uc;
     }
     // the soft ceiling: y / (1 + |y/C|^q)^(1/q), C per polarity
     inline double ceiling(double y) const

@@ -61,6 +61,10 @@ def load_cal(path=os.path.join(DATA, "constants.json")):
 
 def save_cal(cal, notes, fields=None, path=os.path.join(DATA, "constants.json")):
     """write the named fields (all if None) into constants.json; other fields keep the file's values, so stages can run in any order"""
+    if fields is not None:
+        unknown = set(fields) - set(MODEL.fields)
+        if unknown:
+            raise KeyError(f"save_cal: not calibration fields: {sorted(unknown)}")
     old = json.load(open(path)) if os.path.exists(path) else {"values": {}, "notes": {}}
     for name, (off, cnt) in MODEL.fields.items():
         if fields is not None and name not in fields:

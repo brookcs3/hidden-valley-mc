@@ -4,11 +4,21 @@
 
 Hypothesis. The reference's even harmonics on the transformer grid (fit/data/reference_features.json, xf_{core}_f{freq}_{level}) do not
 grow with saturation depth the way the model's static knee asymmetry (x_asym, qp/qn = q (1 +- asym)) makes them grow: they are the
-driver's a2 (1 dB per dB, frequency independent) below the knee, a spike with a FLAT even spectrum (H2 = H4 ~ -60 dBc, the same on all
-three cores and at every frequency) at the onset of saturation, and a floor of -65..-85 dBc in deep saturation that falls with
-frequency at constant depth. Direction (b) says the asymmetry that makes the onset spike must depend on recent history, so that it fades
-once the core is driven through the knee every half cycle: a flux offset (remanence) that builds with the signal and relaxes with a time
-constant, and the variant where the asymmetry parameter itself falls with the tracked saturation depth.
+driver's a2 (1 dB per dB, frequency independent) below the knee, a spike with a FLAT even spectrum (H2 = H4 = -57..-60 dBc, the same on
+all three cores at 20..80 Hz whatever the level the onset happens at) at the onset of saturation, and a floor of -63..-85 dBc once the
+core is through the knee that falls about 9 dB per octave with frequency at constant depth (Nickel/Steel; Iron's floor is its own
+driver's a2). Direction (b) says the asymmetry that makes the onset spike must depend on recent history, so that it fades once the core
+is driven through the knee every half cycle: a flux offset (remanence) that builds with the signal and relaxes with a time constant,
+and the variant where the asymmetry parameter itself falls with the tracked saturation depth.
+
+Result (see the SUMMARY the run prints and the .result.<core>.json files). The remanence proper (V2, V6: a relaxing flux offset built
+from the excess flux) is refuted: its net offset is a DC bias proportional to the rectified excess, so its even orders grow with depth
+and the even residual gets worse than the static knee (14.7..31 dB rms against 11.8..13.7). The depth-tracking asymmetry (V5, V8: the
+knee asymmetry divided by a held measure of how far past the knee the core has been driven, with the driver AC-coupled so a2 cannot
+magnetise the core) halves the even residual (about 6..7 dB rms, from 11.8..13.7) at unchanged odd residual and gain; V9 is the same
+form with its three shape constants fixed (p = 2, 1 Hz, 300 ms), so it adds no calibration field and only refits the stage-2 five.
+What remains (max 16..27 dB) is the frequency dependence of the deep-saturation floor and the 120/160 Hz +21 spikes, which no function
+of depth alone produces.
 
 What this file does, in order:
   1. extracts the reference law: per core, H2/H4 against level at each frequency and against frequency at constant gain reduction, the
@@ -43,6 +53,10 @@ usage: cd <repo> && python3 -u fit/tools/candidates/xfmr-even-remanence.py [--ex
   --explore   the law extraction, the mirror validation and the decomposition only (no fits)
   --quick     every other frequency in the fit (fast look)
   --starts N  multi-start on the asymmetry (1: as fitted; 3: x1, x0.5, x2), the lowest cost kept
+The fits are slow (about 8 min per start of an 8-parameter variant); run one process per core and variant in parallel, e.g.
+  for c in Nickel Iron Steel; do for v in V0 V2 V6 V3 V5 V8 V9; do python3 -u fit/tools/candidates/xfmr-even-remanence.py --cores $c \
+      --variants $v --starts 3 > build_xfmr_even_${c}_$v.log 2>&1 & done; done
+Each writes xfmr-even-remanence.result.<core>.<variant>.json next to this file.
 """
 import json, os, sys, time
 import numpy as np
@@ -123,11 +137,35 @@ def extract_law():
                 if abs(best[0] - depth) < 1.5:
                     row.append(f"{f}Hz +{best[1]} {ref_h(core, f, best[1], 2):.0f}/{ref_h(core, f, best[1], 4):.0f}")
             print(f"    GR {depth:4.1f} dB: " + "  ".join(row))
-    print("\nWhat a mechanism must produce: (i) below the knee H2 = a2 A / 2 only (H4 at the floor), frequency independent, so the driver's\n"
-          "even term must not magnetise the core; (ii) at the onset a spike whose even spectrum is flat (H2 = H4 = H6 within a few dB, an\n"
-          "impulsive, once-per-half-cycle feature) at about -60 dBc on every core and at every frequency, i.e. a function of depth alone;\n"
-          "(iii) in deep saturation even orders that fall back to -65..-85 dBc, lower at higher frequency at the same depth, while H3\n"
-          "keeps rising to -1 dBc: the asymmetry must fade once the core is driven through the knee every half cycle.")
+        # the deep-saturation floor against frequency: H2/H4 at the first level where H3 is above -12 dBc (the core fully through the
+        # knee), against the driver's own H2 = a2 A / 2 at that level read off the 1 kHz row (where the core does nothing)
+        print("  deep-saturation floor: first level with H3 > -12 dBc: freq -> level H2/H4 (driver's H2 at 1 kHz, same level)")
+        row = []
+        for f in ALL_FREQS[:7]:
+            deep = [l for l in LEVELS if ref_h(core, f, l, 3) > -12.0]
+            if deep:
+                l = deep[0]
+                row.append(f"{f}Hz +{l} {ref_h(core, f, l, 2):.0f}/{ref_h(core, f, l, 4):.0f} ({ref_h(core, 1000, l, 2):.0f})")
+        print("    " + "  ".join(row))
+        # the +24 dBFS row (pooled apart by the test suite): which frequencies clip there
+        print("  +24 dBFS row (not fitted): freq -> gain H2/H3: " + "  ".join(
+            f"{f}Hz {ref_gain(core, f, 24):.1f} {ref_h(core, f, 24, 2):.0f}/{ref_h(core, f, 24, 3):.0f}" for f in (80, 120, 160, 320, 1000, 5000)))
+    print("\nWhat a mechanism must produce (levels -12..+21 dBFS, the fitted range):\n"
+          "  (i) below the knee H2 = a2 A / 2 only (1 dB per dB at 1 kHz, H4 at the floor), frequency independent: the driver's even term\n"
+          "      must not magnetise the core;\n"
+          "  (ii) at the onset of saturation (H3 between -45 and -20 dBc) a spike whose even spectrum is flat (H2 = H4 = H6 within 3 dB, an\n"
+          "      impulsive once-per-cycle feature) at -57..-60 dBc on every core at 20..80 Hz, whatever the level the onset happens at\n"
+          "      (+6 at 20 Hz .. +18 at 80 Hz): to first order a function of depth alone. The 120 Hz +21 point (-46.5, 12 dB above that)\n"
+          "      and the 160 Hz +21 point (-54, before the onset) sit at the foot of the +24 dBFS anomaly: at +24 the reference clips at\n"
+          "      160 Hz (H2 -29) and 320 Hz (H2 -12, H2 above H3, gain -2..-3 dB) but is clean at 1 kHz and 5 kHz (H2, H3 on the driver's\n"
+          "      law, higher output than 320 Hz), so that ceiling is frequency selective and not an output clipper; the fitted range keeps\n"
+          "      only its foot;\n"
+          "  (iii) once the core is through the knee (H3 above -12 dBc) the even orders fall to a floor that is frequency dependent at equal\n"
+          "      depth: Nickel/Steel about -63..-66 dBc at 20 Hz, -67 at 30, -71 at 40, -75..-80 at 60..80 Hz (about 9 dB per octave, i.e.\n"
+          "      the even feature's absolute size falls with frequency faster than the fundamental's ceiling rises), then a slow -0.5 dB per\n"
+          "      dB with level while H3 keeps rising to -1 dBc; Iron's floor (-63..-66 at every frequency) is its own driver's a2 (ten times\n"
+          "      Nickel's), which hides the core's floor above 30 Hz. So the asymmetry must be largest at the entry into saturation and fade\n"
+          "      once the core is driven through the knee every half cycle, and what is left must shrink with frequency.")
 
 # ================================================================================================ 2. the numba mirror
 V0, V1, V2, V3, V4, V5, V6, V7, V8, V9 = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
@@ -432,7 +470,7 @@ def main():
         print(f"  {rr['core']:6s} {rr['variant']}: even {m['even_rms']:5.2f}/{m['even_max']:5.1f}  odd {m['odd_rms']:5.2f}/{m['odd_max']:5.1f}  "
               f"gain {m['gain_rms']:.3f}  quiet-even {m['quiet_even_rms']:5.2f}/{m['quiet_even_max']:5.1f}   "
               + " ".join(f"{n}={v:.4g}" for n, v in zip(rr["names"], rr["x"])))
-    out = os.path.join(HERE, f"xfmr-even-remanence.result.{'-'.join(CORES)}.json")   # per-core runs do not clobber each other
+    out = os.path.join(HERE, f"xfmr-even-remanence.result.{'-'.join(CORES)}.{'-'.join(VARIANTS)}.json")   # parallel per-core, per-variant runs do not clobber each other
     json.dump(results, open(out, "w"), indent=1)
     print(f"\nwrote {out}")
 

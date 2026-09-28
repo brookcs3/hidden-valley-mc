@@ -73,6 +73,14 @@ public:
         reset();
     }
 
+    // continue from another core's state (a position change): flux, filters and slow states carry over; the saturated flux is
+    // re-evaluated under this core's law so the differentiator does not see a step
+    void seedFrom(const TransformerCore& o)
+    {
+        phi = o.phi; hs = o.hs; hs2 = o.hs2; lp = o.lp; lift = o.lift; noiseLp = o.noiseLp; geLp = o.geLp;
+        env = o.env; tDie = o.tDie; heat = o.heat; pw = o.pw; caStage = o.caStage;
+        sPrev = P.linear ? phi : sat(phi);
+    }
     void reset()
     {
         phi = 0.0; sPrev = 0.0;
@@ -85,7 +93,9 @@ public:
         double u = g * x;
         if (P.geClassA) u = classA(u);
         else {
-            u = u + P.a2 * u * u + P.a3 * u * u * u;
+            const double uf = P.a3 < 0.0 ? 1.0 / std::sqrt(-3.0 * P.a3) : 1e30;   // beyond the polynomial's fold it clips instead of inverting
+            const double uc = u > uf ? uf : (u < -uf ? -uf : u);
+            u = uc + P.a2 * uc * uc + P.a3 * uc * uc * uc;
             if (P.classA) u = caStage.tick(u);   // CLASS A: the driver module's own terms and ceiling before the core
         }
         double y = P.linear ? linearCore(u) : core(u);
@@ -100,6 +110,7 @@ public:
             pw += (y * y - pw) * kPow;
             const double target = P.heatKPerFs2 * pw;
             heat += (target - heat) * (target > heat ? kHeat : kCool);
+            if (heat > 100.0) heat = 100.0;   // a winding does not run past 100 K over ambient; the gain term stays bounded
             y *= dbToLin(P.heatDbPerK * heat);
         }
         return y;
@@ -114,10 +125,12 @@ private:
         const double az = std::fabs(ph / phik);
         if (az <= 0.02) return ph;
         const double q = ph > 0.0 ? qp : qn;
-        return ph / std::exp(std::log1p(std::exp(q * std::log(az))) / q);
+        const double lz = q * std::log(az);
+        if (lz > 700.0) return ph > 0.0 ? phik : -phik;   // far past the ceiling: the exp would overflow to a wrong zero
+        return ph / std::exp(std::log1p(std::exp(lz)) / q);
     }
 
-    // the core: flux = leaky integral of the drive (backward Euler; the leak is the low-frequency corner), output = the rate of change
+    // the core: flux = leaky integral of the drive (forward Euler; the leak is the low-frequency corner), output = the rate of change
     // of the saturated flux. With S linear this is exactly the first-order high pass; with S saturating, the output is limited to
     // omega * phi_k, a ceiling that rises 6 dB per octave.
     inline double core(double v)
@@ -244,14 +257,11 @@ inline CoreParams coreFor(const double* c, int position, const CoreContext& ctx)
 // one channel's transformer: the active core, and a second one warmed on recent input and crossfaded in when the position changes
 class TransformerBlock {
 public:
-    static constexpr int kHist = 1 << 14;
     void prepare(double fs, uint64_t seed)
     {
         fsr = fs; seedBase = seed;
-        warmLen = int(0.08 * fs); if (warmLen > kHist) warmLen = kHist;
         fadeLen = int(0.02 * fs); if (fadeLen < 16) fadeLen = 16;
-        for (int i = 0; i < kHist; ++i) hist[i] = 0.0;
-        hpos = 0; fading = false; configured = false;
+        fading = false; configured = false;
     }
     void setParams(const CoreParams& p)
     {
@@ -262,12 +272,11 @@ public:
         if (!(p != cur)) return;
         startFade(p);
     }
-    void reset() { a.reset(); b.reset(); fading = false; hasPending = false; for (int i = 0; i < kHist; ++i) hist[i] = 0.0; }
+    void reset() { a.reset(); b.reset(); fading = false; hasPending = false; }
     // start on these parameters at rest, with no crossfade (the first block after a prepare)
     void snap(const CoreParams& p) { reset(); configured = false; setParams(p); }
     inline double process(double x)
     {
-        hist[hpos] = x; hpos = (hpos + 1) & (kHist - 1);
         if (!fading) return act->process(x);
         const double ya = act->process(x), yb = nxt->process(x);
         const double t = double(fpos) / fadeLen, w = 0.5 - 0.5 * std::cos(kPi * t);
@@ -282,8 +291,7 @@ private:
     {
         cur = p;
         nxt->configure(p, fsr, ++seedBase);
-        int pos = (hpos - warmLen) & (kHist - 1);
-        for (int i = 0; i < warmLen; ++i) { nxt->process(hist[pos]); pos = (pos + 1) & (kHist - 1); }
+        nxt->seedFrom(*act);   // the flux and filter states carry over: no history replay in the audio callback
         fading = true; fpos = 0;
     }
     TransformerCore a, b;
@@ -291,8 +299,8 @@ private:
     TransformerCore* nxt = &b;
     CoreParams cur, pending;
     bool configured = false, fading = false, hasPending = false;
-    double fsr = 48000.0, hist[kHist];
-    int hpos = 0, warmLen = 3840, fadeLen = 960, fpos = 0;
+    double fsr = 48000.0;
+    int fadeLen = 960, fpos = 0;
     uint64_t seedBase = 1;
 };
 

@@ -38,9 +38,9 @@ struct DecayNoise {
         on = rmsLin > 0.0 && rate > 0.0;
         p = rate / fs; pf = fissionRate / fs;
         k = onePoleK(1.0 / (kTwoPi * 60.0), fs);   // ion transit 1-7 ms: about 25-150 Hz
-        // power gain of the two cascaded one-poles, summed over their impulse response
-        double a = 0.0, b = 0.0, g = 0.0, x = 1.0;
-        for (int i = 0; i < int(2.0 * fs); ++i) { a += (x - a) * k; b += (a - b) * k; g += b * b; x = 0.0; }
+        // power gain of the two cascaded one-poles (h[n] = k^2 (n+1) r^n, r = 1 - k): sum h^2 = k^4 (1 + r^2) / (1 - r^2)^3
+        const double rr = (1.0 - k) * (1.0 - k);
+        const double g = k * k * k * k * (1.0 + rr) / ((1.0 - rr) * (1.0 - rr) * (1.0 - rr));
         // flat charge distribution in [0, 1]: E[s^2] = 1/3
         amp = on ? rmsLin / std::sqrt(p * g / 3.0) : 0.0;
         famp = mat::kFissionScale * 0.5 * amp;
@@ -68,7 +68,7 @@ public:
     Engine& operator=(const Engine&) = delete;
 
     // replace the calibration (the fitter does this); takes effect at the next prepare()
-    void setCalibration(const double* v) { std::memcpy(cal, v, sizeof(cal)); }
+    void setCalibration(const double* v) { std::memcpy(cal, v, sizeof(cal)); if (prepared) prepare(hostFs); }   // the stages read cal in place
     const double* calibration() const { return cal; }
 
     void prepare(double fs)
@@ -83,7 +83,8 @@ public:
             h.disc.prepare(fi, cal); h.disc.seed(0xC1A5 + 613ull * uint64_t(c));
             h.xf.prepare(fi, 0x51ED + 977ull * uint64_t(c));
             h.up.reset(); h.down.reset();
-            h.optoIn.set(0.010, fi); h.discIn.set(0.010, fi);
+            h.optoIn.set(0.010, fi); h.discIn.set(0.010, fi); h.scfTrim.set(0.015, fi); h.scfTrim.reset(1.0);
+            h.caHp.reset(); h.caLp.reset();
             h.vu.prepare(fs); h.grO.prepare(fs); h.grD.prepare(fs);
             h.grOv = h.grDv = 0.0;
             h.uranium = false;   // forces the decay-noise generator to be set up again for this rate
@@ -119,7 +120,9 @@ public:
         if (dirty) apply();
         const int L = latency();
         for (int i = 0; i < n; ++i) {
-            const double x[2] = { inL[i], inR[i] };
+            // a non-finite or absurd input sample must not poison the stages for the rest of the session
+            double x[2] = { double(inL[i]), double(inR[i]) };
+            for (int c = 0; c < 2; ++c) { if (!std::isfinite(x[c])) x[c] = 0.0; else if (x[c] > 64.0) x[c] = 64.0; else if (x[c] < -64.0) x[c] = -64.0; }
             double wet[2];
             if (os == 1) {
                 internal(x, wet);
@@ -130,15 +133,19 @@ public:
                 internal(u1, w1);
                 for (int c = 0; c < 2; ++c) wet[c] = ch[c].down.process(w0[c], w1[c]);
             }
-            const double m = mixS.tick(ctl[kGMix] * 0.01), hw = hwS.tick(ctl[kGHardwire] ? 1.0 : 0.0);
+            double m = mixS.tick(ctl[kGMix] * 0.01), hw = hwS.tick(ctl[kGHardwire] ? 1.0 : 0.0);
+            if (m < 1e-9) m = 0.0;
+            if (hw < 1e-9) hw = 0.0;
             double y[2];
             for (int c = 0; c < 2; ++c) {
                 double d;
                 if (L == 0) d = x[c];
                 else { d = dry[c][(dpos - L) & (kDelayMax - 1)]; dry[c][dpos] = x[c]; }
-                const double processed = d + m * (wet[c] - d);
-                y[c] = d + hw * (processed - d);
+                if (!std::isfinite(wet[c])) { recover(c); wet[c] = d; }   // should never happen; if it does, the channel restarts
+                const double processed = m > 0.0 ? d + m * (wet[c] - d) : d;   // a bypass is a bypass, whatever the wet path holds
+                y[c] = hw > 0.0 ? d + hw * (processed - d) : d;
                 ch[c].vu.tick(y[c]);
+                ch[c].grOv = ch[c].opto.grDb(); ch[c].grDv = ch[c].disc.grDb();   // once per host sample: the needles are slow
                 ch[c].grO.tick(ch[c].grOv); ch[c].grD.tick(ch[c].grDv);
             }
             if (L) dpos = (dpos + 1) & (kDelayMax - 1);
@@ -171,6 +178,8 @@ private:
     static constexpr int kDelayMax = 64;
 
     struct Ch {
+        Smoother scfTrim;
+        FirstOrder caHp, caLp;
         OptoStage opto;
         DiscreteStage disc;
         TransformerBlock xf;
@@ -187,26 +196,38 @@ private:
     // one sample at the internal rate for both channels
     inline void internal(const double* x, double* out)
     {
-        double a[2], h[2];
+        double a[2], ad[2], h[2];
         for (int c = 0; c < 2; ++c) {
             Ch& k = ch[c];
             const double noise = k.uranium ? k.decay.tick() : 0.0;
-            const double xin = x[c] * caIn;   // CLASS A: the hotter input, ahead of both compressors (1.0 otherwise)
+            double xin = x[c] * caIn;   // CLASS A: the hotter input, ahead of both compressors (1.0 otherwise)
+            xin = k.caLp.tick(k.caHp.tick(xin));   // CLASS A input transformer corners (pass-through unless set)
             const double yo = k.opto.process(xin, noise);
             const double wo = k.optoIn.tick(optoOn[c] ? 1.0 : 0.0);
             a[c] = xin + wo * (yo - xin);
-            h[c] = k.disc.sidechain(a[c]);
-            k.grOv = k.opto.grDb();
+            // the discrete stage's input: the inter-stage gain when both stages are in (following the optical crossfade), and the
+            // SIDECHAIN FILTER's trim, both on audio and sidechain alike
+            const double gi = (1.0 + wo * (interLin - 1.0)) * k.scfTrim.tick(k.disc.filterIn() ? scfLin : 1.0);
+            ad[c] = a[c] * gi;
+            h[c] = k.disc.sidechain(ad[c]);
         }
         if (stereo) { const double s = cal[kc_d_link] * (h[0] + h[1]); h[0] = h[1] = s; }
         for (int c = 0; c < 2; ++c) {
             Ch& k = ch[c];
-            const double yd = k.disc.process(a[c], h[c]);
+            const double yd = k.disc.process(ad[c], h[c]);
             const double wd = k.discIn.tick(discOn[c] ? 1.0 : 0.0);
             const double b = a[c] + wd * (yd - a[c]);
-            k.grDv = k.disc.grDb();
             out[c] = k.xf.process(b) * caOut;
         }
+    }
+
+    // restart one channel's stages at their current settings (after a non-finite sample slipped through)
+    void recover(int c)
+    {
+        Ch& h = ch[c];
+        h.opto.reset(); h.disc.reset(); h.xf.reset(); h.up.reset(); h.down.reset();
+        h.caHp.reset(); h.caLp.reset();
+        h.optoIn.reset(optoOn[c] ? 1.0 : 0.0); h.discIn.reset(discOn[c] ? 1.0 : 0.0);
     }
 
     // controls -> stage configurations (not per sample)
@@ -222,6 +243,11 @@ private:
         ClassAParams ca;
         ca.a2 = cal[kc_ca_a2]; ca.a3 = cal[kc_ca_a3]; ca.a2Env = cal[kc_ca_a2_env]; ca.ceilDb = cal[kc_ca_ceil_db]; ca.q = cal[kc_ca_ceil_q]; ca.asymDb = cal[kc_ca_ceil_asym_db];
         caIn = classA ? dbToLin(cal[kc_ca_in_db]) : 1.0; caOut = classA ? dbToLin(cal[kc_ca_out_db]) : 1.0;
+        interLin = dbToLin(cal[kc_d_inter_db]); scfLin = dbToLin(cal[kc_d_scf_trim_db]);
+        for (int c = 0; c < 2; ++c) {
+            ch[c].caHp.set(FirstOrder::kHighPass, classA ? cal[kc_ca_in_fl_hz] : 0.0, fi);
+            ch[c].caLp.set(FirstOrder::kLowPass, classA ? cal[kc_ca_in_lp_hz] : 0.0, fi);
+        }
         for (int c = 0; c < 2; ++c) {
             const int src = (stereo && c == 1) ? 0 : c;   // STEREO: the left controls govern both channels
             auto P = [&](int p) { return ctl[src * kPerChannel + p]; };
@@ -265,7 +291,7 @@ private:
     double cal[kCalSize];
     int ctl[kNumInputParams];
     bool dirty = true, prepared = false, first = true, stereo = true, lastExhibition = false;
-    double caIn = 1.0, caOut = 1.0;
+    double caIn = 1.0, caOut = 1.0, interLin = 1.0, scfLin = 1.0;
     bool optoOn[2] = { true, true }, discOn[2] = { true, true };
     double hostFs = 48000.0;
     int quality = 0, os = 1;

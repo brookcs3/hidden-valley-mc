@@ -55,6 +55,7 @@ def detector(a, fs, ta, tr, floor_db, dual, t2, c2, goff, Tk, depth, sv):
             flow = (x - w) * k2
             x -= flow
             w += flow / c2
+        if x < rest + 1e-9: x = rest   # the bleed converges asymptotically; snap so that rest is reached exactly (as the C++ does)
         v[i] = x
     return v
 
@@ -272,7 +273,7 @@ def run():
     def rh(p):
         c = cal.copy(); c[MODEL.field("d_a2")] = p[0]; c[MODEL.field("d_a3")] = p[1]
         return np.concatenate([feat_residual(i, render_item(ITEMS[i], c))[:3] for i in ids])
-    r = least_squares(rh, [2.9e-3, 1.4e-3], bounds=([-0.05, -0.05], [0.05, 0.05]), x_scale=[1e-4, 1e-4], diff_step=1e-3)
+    r = least_squares(rh, [2.9e-3, -1.4e-3], bounds=([-0.05, -0.05], [0.05, 0.0]), x_scale=[1e-4, 1e-4], diff_step=1e-3)   # a3 <= 0: a gain cell compresses, it does not expand
     cal[MODEL.field("d_a2")] = r.x[0]; cal[MODEL.field("d_a3")] = r.x[1]
     print(f"  gain cell: a2 {r.x[0]:.4e}, a3 {r.x[1]:.4e}, rms {np.sqrt(np.mean(r.fun ** 2)):.2f} dB")
     if os.environ.get("HVMC_NO_SAVE"):

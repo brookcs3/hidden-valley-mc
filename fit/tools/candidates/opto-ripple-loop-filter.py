@@ -287,11 +287,24 @@ class Score:
                 out.append(wt * (max(m["h"][idx], -110.0) - max(r["h"][idx], -110.0)))
         return np.array(out)
 
-    def resid(self, sh):
+    def knee_resid(self, sh):
+        """model - reference over the two fine knee sweeps (A), 74 points"""
+        out = []
+        for thr in ("20", "10"):
+            X, lens, Y, C, ref, lv = self.knee[thr]; k = int(thr)
+            run_batch(X, lens, FSF, np.full(len(X), sh.A(k)), np.full(len(X), sh.L0(k)), sh.P(), Y, C)
+            g = np.array([20 * np.log10(np.sqrt(np.mean(Y[j, -FS:] ** 2)) / np.sqrt(np.mean(X[j, -FS:] ** 2))) for j in range(len(X))]) + G0
+            out.append(g - ref)
+        return np.concatenate(out)
+
+    def resid(self, sh, knee_w=0.0):
         """the fit objective: harmonics (27 items), statics at t20 (x10), bursts (stage-4 weights x5), 3 kHz + 8 kHz statics (x1): the statics
-        and bursts are weighted as constraints (0.1 dB of static error costs as much as 1 dB of H3), since the task holds them fixed"""
-        return np.concatenate([self.harm_resid(self.harm_table(sh)), 10.0 * (self.stat20.gains(sh) - self.ref_stat20), 5.0 * self.burst_resid(sh),
-                               self.stat3k.gains(sh) - self.ref_3k, self.stat8k.gains(sh) - self.ref_8k])
+        and bursts are weighted as constraints (0.1 dB of static error costs as much as 1 dB of H3), since the task holds them fixed;
+        knee_w > 0 adds the two fine knee sweeps (A) with that weight"""
+        r = [self.harm_resid(self.harm_table(sh)), 10.0 * (self.stat20.gains(sh) - self.ref_stat20), 5.0 * self.burst_resid(sh),
+             self.stat3k.gains(sh) - self.ref_3k, self.stat8k.gains(sh) - self.ref_8k]
+        if knee_w > 0.0: r.append(knee_w * self.knee_resid(sh))
+        return np.concatenate(r)
 
     def report(self, sh, label, full=True):
         table = self.harm_table(sh)
@@ -494,13 +507,13 @@ def state_law(law, null, model_null):
 
 
 # ------------------------------------------------------------------------------------------------ 2. candidates
-def fit_candidate(sc, base, label, names, x0, lo, hi, xs, apply, nfev=40, alt_starts=None):
+def fit_candidate(sc, base, label, names, x0, lo, hi, xs, apply, nfev=40, alt_starts=None, knee_w=0.0):
     """fits the named parameters plus a global shift of the drive table (dthr, dB: the whole knee table moves together, the allowed
     shift family), since removing the persistence pole moves the static knee (the pole smooths the light before the convex cell law)"""
     t0 = time.time(); print(f"\n   {label}:")
     names = list(names) + ["dthr"]; x0 = list(x0) + [base.thr[19] - THR_DB[19]]; lo = list(lo) + [-4.0]; hi = list(hi) + [4.0]; xs = list(xs) + [0.2]
     def resid(p):
-        s = base.copy(); apply(s, p[:-1]); s.thr = THR_DB + p[-1]; return sc.resid(s)
+        s = base.copy(); apply(s, p[:-1]); s.thr = THR_DB + p[-1]; return sc.resid(s, knee_w)
     starts = [x0] + [list(a) + [x0[-1]] for a in (alt_starts or [])]
     r = None
     for st in starts:
@@ -623,6 +636,15 @@ def main():
                           alt_starts=[[c8.gam, np.log10(c8.vth), np.log10(base.mu * 3), np.log10(2.0)]])
     R["d9_shape_dyn"] = sc.report(c9, f"(d9) gamma {c9.gam:.3f} vth {c9.vth:.3f} mu {c9.mu:.2f} attack x {c9.tatt[0] / base.tatt[0]:.3f}, tau_el 0.01 ms", full=True)
     print("     static t20 model-ref by level -50..14:", np.round(sc.stat20.gains(c9) - sc.ref_stat20, 2).tolist())
+    # d9k: the same four parameters with the fine knee sweeps (A) in the objective at weight 10 (0.1 dB of knee error = 1 dB of H3):
+    # how much of d9's harmonic gain survives when the knee is held
+    c9k, _ = fit_candidate(sc, base, "(d9k) as d9 with the fine knee sweeps (A) in the objective, weight 10", ["gamma", "log_vth", "log_mu", "log_att_scale"],
+                           [c9.gam, np.log10(c9.vth), np.log10(c9.mu), np.log10(c9.tatt[0] / base.tatt[0])], [0.7 * base.gam, np.log10(base.vth) - 0.3, -1.0, -1.5], [1.6 * base.gam, np.log10(base.vth) + 0.3, 3.0, 1.5],
+                           [0.05, 0.05, 0.1, 0.1], ap_shape_dyn, nfev, alt_starts=[[base.gam, np.log10(base.vth), np.log10(base.mu), 0.0]], knee_w=10.0)
+    R["d9k_knee"] = sc.report(c9k, f"(d9k) gamma {c9k.gam:.3f} vth {c9k.vth:.3f} mu {c9k.mu:.2f} attack x {c9k.tatt[0] / base.tatt[0]:.3f}, knee-constrained", full=True)
+    print("     fine knee (A) t20 model-ref per 0.5 dB:", np.round(sc.knee_resid(c9k)[:37], 3).tolist())
+    print("     fine knee (A) t10 model-ref per 0.5 dB:", np.round(sc.knee_resid(c9k)[37:], 3).tolist())
+    print("     fine knee (A) t20 baseline model-ref  :", np.round(sc.knee_resid(base)[:37], 3).tolist())
     print(f"     static slope from the law alone p/(1+p), p = n gamma = {c9.pexp:.3f}: {c9.pexp / (1 + c9.pexp):.3f}; the states' attack/release asymmetry changes the effective slope, which is why gamma can move")
     # the best of the loop-filter family with the amplifier on the output, full table
     best_key = min((k for k in R if k not in ("baseline", "amp_out")), key=lambda k: R[k]["h3"] ** 2 + 0.25 * R[k]["h5"] ** 2 + 0.0625 * R[k]["h7"] ** 2)

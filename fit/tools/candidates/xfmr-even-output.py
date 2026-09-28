@@ -27,7 +27,33 @@ Hypotheses tested here (direction (c): even order after the core; (d): the loss 
   D4   C1 with a rate loss: phi += T (v - r phi - re y), re fitted (eddy-like, widens the spikes more at higher frequency);
   D5   C1 with a FLUX OFFSET (remanence, S = sat(phi + off phik)) instead of the hardness asymmetry (the earlier rejection of an offset
        was made with the driver's DC term still reaching the integrator);
-  D6   C1 with both the hardness asymmetry and the flux offset.
+  D6   C1 with both the hardness asymmetry and the flux offset;
+  D7   C1 with a polarity-asymmetric loss, phi += T (v - r (1 +- rasym) phi) (the Class-A driver sources and sinks through different
+       impedances), the hardness asymmetry free as well;
+  D8   ceiling asymmetry with the loss on S(phi): the loop drains any DC of the saturated flux (a self-demagnetising core);
+  D2r  the reverse hybrid of D2: asymmetric BELOW the flux level thr (asym thr^8 / (thr^8 + |phi/phik|^8)), symmetric at the ceiling.
+Analytic bound on (c), printed by --law: a quadratic after the core sees y = A1 cos + A3 cos 3 + ..., its 2f term is
+a2 (A1^2 / 2 + A1 A3 + A3 A5 + ...), and the 1 kHz line (no core term) pins a2 through H2 = 20 log10(a2 A1 / 2); at the onset the burst can
+be at most the driver line + 20 log10(1 + 2 h3) = +0.15 dB at h3 = -41 dBc, so an output-stage even term makes -104.5 dBc where the
+reference has -60.5 (Nickel, Steel; Iron -84.6 against -60.4). Deep in, A3 -> A1 and A1 is the ceiling (6 dB per octave), so the
+output-stage even order rises with drive and with frequency where the reference's falls. The burst is a flux-domain effect.
+Result (2026-09-27, nfev 60, mirror against the C++ 0.010 dB worst; per core Nickel / Iron / Steel, pooled over the three cores in
+brackets; test-suite metric, levels <= +21 dBFS): B0 even 11.89 / 13.23 / 13.35 [12.88], odd 2.50 / 4.88 / 1.66 [3.44], gain 0.039 /
+0.138 / 0.023. C1 even 9.89 / 8.82 / 10.61 [9.72], odd [3.49]: the whole gain over B0 is the removal of the driver's rectified DC from
+the flux (C2, AC-coupled before the core, 10.00 / 9.41 / 10.62 [9.97]); C1L's level limit runs to L = 29-47 (inactive). D1 25.78 /
+10.63 / 27.24 and D8 25.23 / 18.63 / 29.10 (even max 62-68 dB): with the loss on S(phi) the leak vanishes in saturation and the flux
+walks off. D3 (ceiling asymmetry) 14.44 / 12.84 / 16.29 and D5 (flux offset) 13.03 / 11.53 / 15.62: even order growing with drive, as
+before. D4 (rate loss re = 0.007-0.011) 9.94 / 8.98 / 10.57 and D7 (rasym fitted to 2e-5 from 0.1) 9.83 / 8.58 / 10.51: the loss term
+carries no even-order information. D2 (asymmetric above thr) drives thr to 0.17-0.22 and collapses onto C1 (10.03 / 8.77 / 10.56). D2r,
+the reverse hybrid, is the best of the set: even 9.12 / 7.09 / 8.10 [8.06], max 23.5 / 27.2 / 24.6, odd 1.80 / 4.95 / 1.86 [3.38], gain
+0.042 / 0.060 / 0.024, with thr = 0.95 / 0.80 / 0.81 phik and asym 0.033 / 0.052 / 0.050: the onset burst (D = 0 .. 6 dB) is matched
+within 2 dB at every frequency, but the post-burst dip (D = 9 dB: 20 Hz +9, 30 Hz +12) is 8-21 dB too deep and the deep floor is
+still 4-6 dB low at 20 Hz and 2-4 dB high at 40 Hz on Nickel and Steel (the floor's 7 dB per octave fall with frequency is not a
+static curve's), and the 120 / 160 Hz +21 dBFS points are 7-12 dB low (the reference's burst is 6-13 dB stronger there than at the
+same flux drive at 20-80 Hz). Verdict: directions (c) and (d) are refuted (the even order is neither after the core nor in the loss
+term); the asymmetric-above hybrid is refuted; a knee-confined static asymmetry (D2r) improves the even order from 12.9 to 8.1 dB
+rms pooled at unchanged odd order and gain, but does not reach the history-dependent decay of the remanence candidate
+(xfmr-even-remanence.py V8, 6.1 / 6.1-6.9 / 7.1 per core), which is what the decaying floor asks for.
 Each candidate is a numba mirror of the transformer path (gain, driver, core, high shelf, low pass; both compressor stages out) validated
 against the C++ engine on the stage-2 calibration before any fit, then fitted per core with bounded least squares (soft L1) on the grid
 -12 .. +21 dBFS x 10 frequencies (+24 dBFS is the reference's output ceiling and is left out, as tests/pb_reference.py does), on the
@@ -49,7 +75,7 @@ from common import F, ITEMS, MODEL, load_cal, render_item, feat_residual, protoc
 ARGS = sys.argv[1:]
 def opt(name, default):
     return ARGS[ARGS.index(name) + 1] if name in ARGS else default
-VARIANTS = opt("--variants", "B0,C1,C1L,C2,D1,D2,D3,D4,D5,D6").split(",")
+VARIANTS = opt("--variants", "B0,C1,C1L,C2,D1,D2,D2r,D3,D4,D5,D6,D7,D8").split(",")
 CORES = opt("--cores", "Nickel,Iron,Steel").split(",")
 NFEV = int(opt("--nfev", "60"))
 FREQS = [20, 30, 40, 60, 80, 120, 160, 320, 1000, 5000]
@@ -76,10 +102,11 @@ def sat(ph, phik_p, phik_n, qp, qn):
 
 
 @njit(cache=True)
-def run_one(x, fs, gain_db, a2, a3, sat_db, q, asym, fl_hz, hs_hz, hs_db, lp_hz, mode_a2, mode_loss, mode_asym, L, thr, re, off):
+def run_one(x, fs, gain_db, a2, a3, sat_db, q, asym, fl_hz, hs_hz, hs_db, lp_hz, mode_a2, mode_loss, mode_asym, L, thr, re, off, rasym):
     """one channel of the transformer path; modes: a2 0 = before the core, 1 = after (output stage), 2 = before but AC-coupled;
-    loss 0 = r phi, 1 = r S(phi), 2 = r phi + re y; asym 0 = knee hardness, 1 = hardness above thr, 2 = ceiling, 3 = flux offset only
-    (asym is the offset in knee-flux units), 4 = hardness plus the offset off (knee-flux units)"""
+    loss 0 = r phi, 1 = r S(phi), 2 = r phi + re y, 3 = r (1 +- rasym) phi by the polarity of phi (the driver's source impedance differs
+    between sourcing and sinking); asym 0 = knee hardness, 1 = hardness above thr, 2 = ceiling, 3 = flux offset only (asym is the offset
+    in knee-flux units), 4 = hardness plus the offset off (knee-flux units), 5 = hardness below thr only (symmetric above)"""
     n = x.shape[0]; y = np.empty(n)
     T = 1.0 / fs
     g = 10.0 ** (gain_db / 20.0)
@@ -89,7 +116,7 @@ def run_one(x, fs, gain_db, a2, a3, sat_db, q, asym, fl_hz, hs_hz, hs_db, lp_hz,
     phik_p = phik; phik_n = phik
     if mode_asym == 2:
         qp = q; qn = q; phik_p = phik * (1.0 + asym); phik_n = phik * (1.0 - asym)
-    if mode_asym == 1:
+    if mode_asym == 1 or mode_asym == 5:
         qp = q; qn = q
     dphi = 0.0
     if mode_asym == 3:
@@ -120,12 +147,14 @@ def run_one(x, fs, gain_db, a2, a3, sat_db, q, asym, fl_hz, hs_hz, hs_db, lp_hz,
             phi += T * (v - r * phi)
         elif mode_loss == 1:
             phi += T * (v - r * sat(phi, phik_p, phik_n, qp, qn))
-        else:
+        elif mode_loss == 2:
             phi += T * (v - r * phi - re * yPrev)
-        if mode_asym == 1:
+        else:
+            phi += T * (v - r * (1.0 + rasym if phi > 0.0 else 1.0 - rasym) * phi)
+        if mode_asym == 1 or mode_asym == 5:
             az = abs(phi) / phik
-            a8 = az ** 8
-            ae = asym * a8 / (thr ** 8 + a8)
+            a8 = az ** 8; t8 = thr ** 8
+            ae = asym * a8 / (t8 + a8) if mode_asym == 1 else asym * t8 / (t8 + a8)
             s = sat(phi, phik_p, phik_n, q * (1.0 + ae), q * (1.0 - ae))
         else:
             s = sat(phi + dphi, phik_p, phik_n, qp, qn)
@@ -153,7 +182,7 @@ def run_grid(X, fs, p, modes, extra):
     m = X.shape[0]; Y = np.empty_like(X)
     for j in prange(m):
         Y[j] = run_one(X[j], fs, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], modes[0], modes[1], modes[2],
-                       extra[0], extra[1], extra[2], extra[3])
+                       extra[0], extra[1], extra[2], extra[3], extra[4])
     return Y
 
 
@@ -195,7 +224,7 @@ def features(ids, Y):
 def check_features():
     """the cached lock-in against protocol.feature on a few rendered items"""
     ids = ["xf_Nickel_f20_12", "xf_Iron_f5000_21", "xf_Steel_f1000_-12", "xf_Iron_f60_18"]
-    X = stimuli(ids); Y = run_grid(X, FSF, pvec(base_params(1)), np.array([0, 0, 0]), np.array([0.0, 1.0, 0.0, 0.0]))
+    X = stimuli(ids); Y = run_grid(X, FSF, pvec(base_params(1)), np.array([0, 0, 0]), np.array([0.0, 1.0, 0.0, 0.0, 0.0]))
     fa = features(ids, Y); worst = 0.0
     for i, y, a in zip(ids, Y, fa):
         b = protocol.feature(ITEMS[i], np.stack([y, y]), FS)
@@ -252,12 +281,15 @@ CAND = {
     "D4":  (1, 2, 0, ["re"]),
     "D5":  (1, 0, 3, []),
     "D6":  (1, 0, 4, ["off"]),
+    "D7":  (1, 3, 0, ["rasym"]),     # polarity-asymmetric loss (the driver's source impedance) with the hardness asymmetry free
+    "D8":  (1, 1, 2, []),            # ceiling asymmetry with the loss on S(phi): the loop drains the DC of the saturated flux
+    "D2r": (1, 0, 5, ["thr"]),       # the reverse hybrid: asymmetric below the flux level thr, symmetric above
 }
 NL = ["a2", "a3", "sat_db", "q", "asym"]
 BOUNDS = {"a2": (1e-8, 5e-3), "a3": (-5e-2, -1e-7), "sat_db": (-6.0, 12.0), "q": (1.5, 30.0), "asym": (-0.5, 0.5),
-          "L": (0.5, 100.0), "thr": (0.3, 3.0), "re": (0.0, 2.0), "off": (-0.3, 0.3)}
-SCALE = {"a2": 1e-5, "a3": 1e-4, "sat_db": 0.5, "q": 1.0, "asym": 0.01, "L": 2.0, "thr": 0.1, "re": 0.05, "off": 0.005}
-X0 = {"L": 10.0, "thr": 1.0, "re": 0.02, "off": 0.01}
+          "L": (0.5, 100.0), "thr": (0.1, 3.0), "re": (0.0, 2.0), "off": (-0.3, 0.3), "rasym": (-0.9, 0.9)}
+SCALE = {"a2": 1e-5, "a3": 1e-4, "sat_db": 0.5, "q": 1.0, "asym": 0.01, "L": 2.0, "thr": 0.1, "re": 0.05, "off": 0.005, "rasym": 0.02}
+X0 = {"L": 10.0, "thr": 1.0, "re": 0.02, "off": 0.01, "rasym": 0.1}
 
 def base_params(k):
     return dict(gain_db=cget("x_gain_db", k), a2=cget("x_a2", k), a3=cget("x_a3", k), sat_db=cget("x_sat_db", k), q=cget("x_q", k),
@@ -268,7 +300,7 @@ def pvec(d):
 
 def evaluate(ids, X, d, cand, extra):
     ma, ml, ms, _ = CAND[cand]
-    ex = np.array([extra.get("L", 0.0), extra.get("thr", 1.0), extra.get("re", 0.0), extra.get("off", 0.0)])
+    ex = np.array([extra.get("L", 0.0), extra.get("thr", 1.0), extra.get("re", 0.0), extra.get("off", 0.0), extra.get("rasym", 0.0)])
     Y = run_grid(X, FSF, pvec(d), np.array([ma, ml, ms]), ex)
     return features(ids, Y)
 
@@ -341,6 +373,18 @@ def law():
                 if D < 9: row.append("   ---"); continue
                 row.append(f"{F[f'xf_{core}_f{f}_{l}']['h'][0] - F[f'xf_{core}_f1000_{l}']['h'][0]:6.1f}")
             print(f"  {f:5d} " + " ".join(row))
+        # direction (c) analytically: a quadratic AFTER the core sees y = A1 cos + A3 cos 3 + ..., so its 2f term is a2 (A1^2 / 2 + A1 A3 +
+        # A3 A5 + ...) and its 4f term a2 (A1 A3 + A1 A5 + ...). The 1 kHz line (no core term) pins a2: H2 = 20 log10(a2 A1 / 2). At the
+        # onset the most the burst can be is the driver line + 20 log10(1 + 2 h3): with h3 = -41 dBc that is +0.15 dB, not the +18 to +25
+        # dB the reference shows. Deep in, A3 -> A1 and the sum grows: the output-stage even order RISES with drive and with frequency
+        # (A1 = the ceiling, 6 dB per octave) where the reference's falls.
+        print(f"{core}: the output-stage quadratic bound at the onset (D = 3 dB): driver line at that level, + 20 log10(1 + 2 h3), reference")
+        for f in (20, 40, 80, 160):
+            l = 3 + int(round(20 * np.log10(f / 20)))
+            if l not in LEVELS: continue
+            h2d = F[f'xf_{core}_f1000_{l}']['h'][0]; h3 = F[f'xf_{core}_f{f}_{l}']['h'][1]; h2 = F[f'xf_{core}_f{f}_{l}']['h'][0]
+            bound = h2d + 20 * np.log10(1 + 2 * 10 ** (h3 / 20))
+            print(f"  {f:5d} Hz {l:+3d} dBFS: driver {h2d:6.1f}  output-quadratic bound {bound:6.1f}  reference {h2:6.1f}  (h3 {h3:6.1f})")
 
 
 # ------------------------------------------------------------------------------------------------ main
@@ -375,7 +419,8 @@ def main():
     results = {}
     for cand in VARIANTS:
         print(f"\n== {cand}: a2 {'before' if CAND[cand][0] == 0 else 'after' if CAND[cand][0] == 1 else 'before, AC-coupled'} the core, "
-              f"loss {['r phi', 'r S(phi)', 'r phi + re y'][CAND[cand][1]]}, asym {['hardness', 'hardness above thr', 'ceiling', 'flux offset', 'hardness + flux offset'][CAND[cand][2]]}")
+              f"loss {['r phi', 'r S(phi)', 'r phi + re y', 'r (1 +- rasym) phi'][CAND[cand][1]]}, "
+              f"asym {['hardness', 'hardness above thr', 'ceiling', 'flux offset', 'hardness + flux offset', 'hardness below thr'][CAND[cand][2]]}")
         for core in CORES:
             k = ("Nickel", "Iron", "Steel").index(core)
             results[f"{cand}/{core}"] = fit_core(core, k, cand)

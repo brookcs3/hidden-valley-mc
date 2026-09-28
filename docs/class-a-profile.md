@@ -120,7 +120,7 @@ Twelve scalars. `calLayoutHash()` changes, so the fitted header must be regenera
 xin = x * 10^(ca_in_db / 20)           in Engine::internal, before k.opto.process
 ```
 
-Why at the input and not at the output. The vendors did not report one number; they reported a range, "1-3 dB hotter with the gain set to identical values". A fixed offset at the output would be one number. An offset at the input is seen through the static curves: below both knees the whole offset comes out; above the optical knee the output rises `o_gamma / (1 + o_gamma)` = 0.59 dB per dB (`o_gamma` = 1.42, fitted), so +2.5 dB in becomes +1.5 dB out; with the discrete stage compressing as well, less again. An input offset of +2.5 to +3 dB produces exactly a 1 to 3 dB spread at the output across settings and levels, which is what was reported. The input transformer comparison (section 1.3c) puts part of it, a fraction of a dB to about 1.8 dB, at the input independently; the rest is module gain structure, which in a hand-built Class-A module is also ahead of the compressors. `ca_out_db = 0.0`, range 0 to +1.0, is kept for the case where a bench session finds the static family shifted along the output axis instead (section 4).
+Why at the input and not at the output. The vendors did not report one number; they reported a range, "1-3 dB hotter with the gain set to identical values". A fixed offset at the output would be one number. An offset at the input is seen through the static curves: below both knees the whole offset comes out; above the optical knee the output rises `o_gamma / (1 + o_gamma)` = 0.59 dB per dB (`o_gamma` about 1.34 to 1.42 depending on the fit in force, see `FittedConstants.hpp`), so +2.5 dB in becomes +1.5 dB out; with the discrete stage compressing as well, less again. An input offset of +2.5 to +3 dB produces exactly a 1 to 3 dB spread at the output across settings and levels, which is what was reported. The input transformer comparison (section 1.3c) puts part of it, a fraction of a dB to about 1.8 dB, at the input independently; the rest is module gain structure, which in a hand-built Class-A module is also ahead of the compressors. `ca_out_db = 0.0`, range 0 to +1.0, is kept for the case where a bench session finds the static family shifted along the output axis instead (section 4).
 
 Consequence, stated plainly: at the same panel settings the CLASS A profile compresses about 2.5 dB earlier than REFERENCE and HARDWARE, which is about one position of the discrete threshold (2.7 dB per step) and one to two of the optical table. The detector laws, the 24-entry tables and the six curves are untouched; the signal reaching them is hotter. That is what "smoother compression at the same settings" most plausibly was: more of the optical stage's 2.6:1 knee in play at the settings a standard unit's owner is used to. Anyone wanting panel parity instead moves the value to `ca_out_db`.
 
@@ -175,10 +175,10 @@ y = ui * 10^((d_gain_db[gain] - g) / 20) + noise
 out = classA(y)
 ```
 
-**Transformer driver.** Per core, `x_a2 + ca_a2 (1 + ca_a2_env env)` and `x_a3 + ca_a3` replace `x_a2, x_a3` in `TransformerCore::process`, and the ceiling is applied to the driver output before the core:
+**Transformer driver.** Per core, the module block (its own polynomial and ceiling) follows the fitted driver polynomial in `TransformerCore::process`, before the core (as implemented; the two polynomials in cascade are the summed form to first order):
 
 ```
-u = g x;  u = u + a2 u^2 + a3 u^3;  u = ceiling(u);  y = core(u)
+u = g x;  u = u + x_a2 u^2 + x_a3 u^3;  u = classA(u);  y = core(u)
 ```
 
 For Iron this makes two single-ended stages in cascade (the module and the 2N3055 driver): the even terms add if the stages are non-inverting and subtract if both invert, so Iron's total even term lies anywhere from 0 to 1.6e-4 [DERIVED]; the profile adds (total 1.6e-4, H2 -82 dBc at 0 dBFS) and a bench H2 phase measurement on a Class A unit decides. The block applies to Nickel, Iron and Steel only; the four invented positions keep their own definitions (GERMANIUM already carries its own Class-A block).

@@ -64,6 +64,8 @@ static constexpr int kOptoStates = 3;
     S(d_rel_depth_db, 0.55)     /* the bleed discharges toward the threshold minus this depth (the node's rest point) */                        \
     S(d_att_sv_db, 17.4)        /* attack conductance law: factor 1 + (level above the release reference) / this, in dB */          \
     S(d_link, 0.5)              /* stereo: detector input = d_link * (left + right) */                                                \
+    S(d_inter_db, 2.14)         /* gain between the stages when both are in (measured: both in at no GR is this much above the sum) */ \
+    S(d_scf_trim_db, 0.64)      /* SIDECHAIN FILTER in: a trim on the discrete stage's input, audio and sidechain alike */             \
     S(d_a2, 0.0)                /* gain cell even-order term, on the cell input */                                                   \
     S(d_a3, 0.0)                /* gain cell odd-order term */                                                                        \
     S(d_hwunit_a2, 0.0)         /* Measured Unit profile: the torn-down unit's even-order term */                                     \
@@ -129,6 +131,10 @@ inline uint64_t calLayoutHash()
         for (const char* p = f[i].name; *p; ++p) { h ^= uint8_t(*p); h *= 1099511628211ull; }
         h ^= uint64_t(f[i].count) + 0x9E37ull; h *= 1099511628211ull;
     }
+    // the meaning of the curve tables depends on the grid, so a grid change must also invalidate a fitted header
+    const double grid[3] = { double(kCurveN), kCurveX0, kCurveDx };
+    const unsigned char* gb = reinterpret_cast<const unsigned char*>(grid);
+    for (size_t i = 0; i < sizeof(grid); ++i) { h ^= gb[i]; h *= 1099511628211ull; }
     return h;
 }
 

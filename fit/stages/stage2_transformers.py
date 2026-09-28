@@ -23,7 +23,7 @@ def get(cal, k, names):
     return [cal[MODEL.fields[n][0] + k] for n in names]
 
 def digital_response(p, freqs, fs=48000.0):
-    """closed-form response of the linear path: gain, backward-Euler leaky-integrator high pass (pole 1 - 2 pi fl / fs), TPT high shelf,
+    """closed-form response of the linear path: gain, forward-Euler leaky-integrator high pass (pole 1 - 2 pi fl / fs), TPT high shelf,
     TPT low pass (the same forms the C++ runs)"""
     gain_db, fl, hs_hz, hs_db, lp_hz = p
     w = 2 * np.pi * np.asarray(freqs, dtype=float) / fs

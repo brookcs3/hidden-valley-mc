@@ -12,7 +12,8 @@
 //  5. HQ mode: latency is 39 samples and a 1 kHz tone through HQ matches STANDARD after the delay;
 //  6. compression sanity: threshold up gives more gain reduction, and the meter reads it;
 //  7. click test: stepping ratio, transformer and bypass switches while noise plays stays bounded;
-//  8. transformer ceiling: a 20 Hz tone at +18 dBFS comes out limited (the flux ceiling), a 1 kHz tone does not.
+//  8. transformer ceiling: a 20 Hz tone at +18 dBFS comes out limited (the flux ceiling), a 1 kHz tone does not;
+//  9. robustness: NaN, Inf and absurd input samples leave the engine finite and working, and the bypass stays transparent.
 // Also writes <out_dir>/cpp_reference.json (a few renders' RMS figures) for tests/crosscheck.py.
 #include <cstdio>
 #include <cstdlib>
@@ -21,6 +22,7 @@
 #include <vector>
 #include <random>
 #include <string>
+#include <limits>
 #include "dsp/Engine.hpp"
 
 using namespace hvmc;
@@ -210,6 +212,24 @@ int main(int argc, char** argv)
         const double gl = rmsDb(a.l, size_t(fs / 2)) - rmsDb(lo, size_t(fs / 2)), gh = rmsDb(b.l, size_t(fs / 2)) - rmsDb(hi, size_t(fs / 2));
         std::snprintf(buf, sizeof buf, "+18 dBFS: 20 Hz gain %+.2f dB, 1 kHz gain %+.2f dB", gl, gh);
         report("the core limits low frequencies, not 1 kHz", gl < -3.0 && gh > -1.0, buf);
+    }
+
+    // 9. a non-finite input sample must not poison the session, and the bypasses must stay transparent through it
+    {
+        Engine e; e.setParam(kPOpticalThreshold, 17); e.setParam(kPDiscreteThreshold, 15); e.setParam(kPTransformer, kIron); e.prepare(fs);
+        std::vector<float> s = sine(-10.0, 1000.0, 2.0, fs);
+        s[1000] = std::numeric_limits<float>::quiet_NaN(); s[1500] = std::numeric_limits<float>::infinity(); s[2000] = 1e30f;
+        Render o = run(e, s, s);
+        float pk; const bool ok = finite(o.l, &pk);
+        const double tail = rmsDb(o.l, size_t(fs)), ref = rmsDb(s, size_t(fs));
+        std::snprintf(buf, sizeof buf, "output %s, last-second level %+.2f dB re input (compressing)", ok ? "finite" : "NOT finite", tail - ref);
+        report("a NaN, an Inf and a 1e30 input sample leave the engine finite and working", ok && tail - ref < -3.0 && tail - ref > -40.0, buf);
+        Engine b; b.setParam(kGHardwire, 0); b.setParam(kPTransformer, kIron); b.prepare(fs);
+        std::vector<float> t((size_t)fs, 0.1f); t[10] = std::numeric_limits<float>::quiet_NaN();
+        Render ob = run(b, t, t);
+        bool clean = true;
+        for (size_t i = 0; i < t.size(); ++i) if (i != 10 && ob.l[i] != t[i]) { clean = false; break; }
+        report("HARDWIRE OUT stays bit-transparent after a NaN sample (the NaN itself becomes 0)", clean && ob.l[10] == 0.0f, clean ? "identical elsewhere" : "differs");
     }
 
     // cpp_reference.json for the Python cross-check

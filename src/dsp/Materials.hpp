@@ -73,7 +73,7 @@ static constexpr double kUraniumHeatTau = 3.0, kUraniumCoolTau = 8.0;   // [D]
 // GERMANIUM: vintage alloy-junction germanium devices in the Class-A stage, the detector diodes and the gain cell; ideal core.
 static constexpr double kGeH2Scale = 6.0;                // [E-estimate] even-order drive against the silicon Iron stage
 static constexpr double kGeLoopLpHz = 5000.0;            // [P] alpha cut-off of alloy-junction power devices, 3-7 kHz
-static constexpr double kGeHfShelfDb = -1.0;             // [D] output HF shelf at 20 kHz
+static constexpr double kGeHfShelfDb = -1.0;             // [D] output HF shelf, -1 dB from 10 kHz (the corner is set in coreFor)
 static constexpr double kGeLeakDoubleC = 9.0;            // [P] germanium leakage doubles about every 9 C
 static constexpr double kGeLeakRatio25 = 0.3;            // [D] detector leak against release at 25 C (physical 2.4-43 with SHMC values)
 static constexpr double kGeDieRiseC = 15.0;              // [D] Class-A die above room temperature at quiescent power

@@ -86,7 +86,7 @@ protected:
 
     float getParameterValue(uint32_t index) const override
     {
-        return index < uint32_t(hvmc::kNumParams) ? fValues[index] : 0.0f;
+        return index < uint32_t(hvmc::kNumParams) ? fValues[index].load(std::memory_order_relaxed) : 0.0f;
     }
 
     void setParameterValue(uint32_t index, float value) override
@@ -96,8 +96,8 @@ protected:
         float v = std::round(value);
         if (v < 0.0f) v = 0.0f;
         if (v > float(steps - 1)) v = float(steps - 1);
-        if (v != fValues[index]) {
-            fValues[index] = v;
+        if (v != fValues[index].load(std::memory_order_relaxed)) {
+            fValues[index].store(v, std::memory_order_relaxed);
             fDirty.store(true);
             if (index == uint32_t(hvmc::kGQuality)) setLatency(uint32_t(fEngine->latencyFor(int(v))));
         }
@@ -123,19 +123,20 @@ protected:
         fEngine->process(inputs[0], inputs[1], outputs[0], outputs[1], int(frames));
         for (int i = hvmc::kNumInputParams; i < hvmc::kNumParams; ++i) {
             double m = fEngine->meter(i);
+            const double hi = i == hvmc::kOMagicEye ? 0.0 : 20.0;   // each output stays inside its declared range
             if (m < -80.0) m = -80.0;
-            if (m > 20.0) m = 20.0;
-            fValues[i] = float(m);
+            if (m > hi) m = hi;
+            fValues[i].store(float(m), std::memory_order_relaxed);
         }
     }
 
 private:
     void pushControls()
     {
-        for (int i = 0; i < hvmc::kNumInputParams; ++i) fEngine->setParam(i, int(fValues[i]));
+        for (int i = 0; i < hvmc::kNumInputParams; ++i) fEngine->setParam(i, int(fValues[i].load(std::memory_order_relaxed)));
     }
 
-    float fValues[hvmc::kNumParams];
+    std::atomic<float> fValues[hvmc::kNumParams];   // written by the host's thread and by run(), read by both
     hvmc::Engine* fEngine;
     std::atomic<bool> fDirty;
 

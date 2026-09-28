@@ -67,7 +67,7 @@ public:
     void reset()
     {
         sc.reset(); hwLp.reset(); grLoss.reset(); scLp.reset(); caStage.reset();
-        leakTarget = leakLightFor(cfg.thr); leakS.reset(leakTarget); leakL = leakTarget;
+        leakTarget = leakFor(); leakS.reset(leakTarget); leakL = leakTarget;
         // at rest the cell sits on the idle leak: no start-up transient at the divider
         const double c0 = std::pow(leakTarget, c[kc_o_gamma]);
         L = L2 = 0.0; for (int s = 0; s < kOptoStates; ++s) st[s] = c0;
@@ -79,13 +79,23 @@ public:
     void configure(const OptoConfig& nc)
     {
         const bool first = !configured;
+        if (!first) {
+            // engaging a slow option: start its state in equilibrium with the cell, not from zero
+            if (nc.memory && !cfg.memory) { mem = cond; expo = cond > 1.0 ? 1.0 : cond; }
+            if (nc.halfLife && !cfg.halfLife) {
+                const double src = mat::kUraniumSlowShare * cond;
+                n1 = kTh > 0.0 ? src / kTh : 0.0; n2 = kPa > 0.0 ? src / kPa : 0.0; n3 = kU > 0.0 ? src / kU : 0.0;
+            }
+        }
         cfg = nc; configured = true;
         kEl2 = cfg.tauEl2 > 0.0 ? onePoleK(cfg.tauEl2, fsr) : 1.0;
-        leakTarget = leakLightFor(cfg.thr);
+        leakTarget = leakFor();
         caStage.set(cfg.ca);
         if (first) reset();
     }
 
+    // the idle light: the sidechain filter blocks it (measured: with the filter in, the no-GR gain no longer falls with the threshold)
+    double leakFor() const { return cfg.scFilter ? 0.0 : leakLightFor(cfg.thr); }
     // the idle light for a threshold position: cond0 = o_leak (A / A20)^o_leak_q, entered before the cell law as L0 = cond0^(1/gamma)
     double leakLightFor(int thr) const
     {
@@ -99,7 +109,9 @@ public:
     {
         double b2 = c[kc_o_b2], b3 = c[kc_o_b3];
         if (cfg.classA) { caStage.track(x); b2 += caStage.a2Now(); b3 += caStage.a3(); }   // the Class-A module's terms on the amplifier
-        const double xa = x + b2 * x * x + b3 * x * x * x;
+        const double uf = b3 < 0.0 ? 1.0 / std::sqrt(-3.0 * b3) : 1e30;   // beyond the polynomial's fold it clips instead of inverting
+        const double xc = x > uf ? uf : (x < -uf ? -uf : x);
+        const double xa = xc + b2 * xc * xc + b3 * xc * xc * xc;
         const double g = 1.0 / (1.0 + cond);
         double v = g * xa + noise;
         if (cfg.hwUnit) {

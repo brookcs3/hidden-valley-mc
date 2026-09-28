@@ -17,8 +17,11 @@ between the rectifier and the turn-on unless stated:
   slew      peak detector whose fall is a constant slew S (drive units per second): the relative ripple falls with level
   rclevel   the rc variant with a level-dependent time constant tau = tau0 (drive / o_vth)^(-kappa)
 For each variant only its own parameters are fitted, plus a global drive offset dA (dB, added to every o_thr_db entry: the knee must
-not move at 1 kHz) and the persistence o_tau_el (whose job overlaps). Everything else is the calibration in fit/data/constants.json at
-the start of the run. The fit is on the static series of positions 14/18/20/22 (weight 2 per dB) and the 27 opto_harm_t* items
+not move at 1 kHz), the persistence o_tau_el (whose job overlaps) and the panel exponent o_n: the calibration's n was fitted for the
+pulse-train light of the instantaneous turn-on (whose mean grows as (d - vth)^(n + 1/2) near the knee), and a turn-on acting on a
+smoothed drive has a different mean-light law, so freezing n would refute the smoothing on the statics alone. A control ("none")
+refits dA, tau_el and n with no smoother, so each variant's gain is read against it. Everything else is the calibration in
+fit/data/constants.json at the start of the run. The fit is on the static series of positions 14/18/20/22 (weight 2 per dB) and the 27 opto_harm_t* items
 (gain weight 2, H3 1, H5 0.5, H7 0.25; the feat_residual floor rule). The report for every variant: H3/H5/H7 error rms by
 frequency, the gain error, statics at t20 and the 100 Hz / 3 kHz / 8 kHz series, the fine knee (A) at t20 and t10, the nine burst
 envelopes (stage-4 weights), the HF rows and the no-GR rows. The mirror is stage 4's run_one with the detector options added, and is
@@ -320,7 +323,7 @@ def statics_report(sh):
 
 
 def full_report(sh, label):
-    print(f"\n== {label}: det {sh.det} p1 {sh.p1:.3e} p2 {sh.p2:.3e} dA {sh.dA:+.3f} dB tau_el {sh.tau_el * 1e3:.4f} ms")
+    print(f"\n== {label}: det {sh.det} p1 {sh.p1:.3e} p2 {sh.p2:.3e} dA {sh.dA:+.3f} dB tau_el {sh.tau_el * 1e3:.4f} ms n {sh.n:.4f}")
     summ, allh, gerr = harm_table(sh, label)
     st = statics_report(sh); kn = fine_knee(sh); bw, bp = bursts(sh)
     print(f"   SUMMARY {label:10s}| H3 rms 100/1k/4k {summ[100][0]:.1f}/{summ[1000][0]:.1f}/{summ[4000][0]:.1f} | H5 {summ[100][1]:.1f}/{summ[1000][1]:.1f}/{summ[4000][1]:.1f} | "
@@ -332,6 +335,7 @@ def full_report(sh, label):
 # ------------------------------------------------------------------------------------------------ the fits
 # per variant: (parameters after dA and log10 tau_el) name, log10 lower, log10 upper, grid starts (log10)
 CANDS = {
+    "none":    [],
     "rc":      [("log10 tau", -5.0, -1.5, [-4.3, -4.0, -3.7, -3.4, -3.1, -2.5, -2.0])],
     "peak":    [("log10 tau_rise", -6.3, -3.0, [-6.0, -5.0, -4.3]), ("log10 tau_fall", -4.7, -1.5, [-4.0, -3.5, -3.0, -2.3])],
     "rms":     [("log10 tau", -5.0, -1.5, [-4.3, -4.0, -3.7, -3.4, -3.1, -2.5, -2.0])],
@@ -348,38 +352,41 @@ FORCED = {"rc": (-3.6,), "peak": (-6.0, -3.3), "rms": (-3.6,), "pre": (-4.0,), "
 
 def fit_forced(sh0, name, t0):
     spec = CANDS[name]; fixed = FORCED[name]
-    f = lambda q: resid(apply(sh0, name, np.array([q[0], q[1]] + list(fixed))))
-    r = least_squares(f, [0.0, np.log10(sh0.tau_el)], bounds=([-6.0, -6.0], [6.0, -3.0]), x_scale=[0.5, 0.2], diff_step=1e-2, max_nfev=4 if QUICK else 12)
-    print(f"   {name} forced at " + ", ".join(f"{b[0]} {v}" for b, v in zip(spec, fixed)) + f": cost {r.cost:.2f}, dA {r.x[0]:+.3f}, log10 tau_el {r.x[1]:.3f}  [{time.time() - t0:.0f} s]")
+    f = lambda q: resid(apply(sh0, name, np.array([q[0], q[1], q[2]] + list(fixed))))
+    r = least_squares(f, [0.0, np.log10(sh0.tau_el), np.log10(sh0.n)], bounds=([-6.0, -6.0, -0.3], [6.0, -3.0, 0.5]), x_scale=[0.5, 0.2, 0.05], diff_step=1e-2, max_nfev=4 if QUICK else 12)
+    print(f"   {name} forced at " + ", ".join(f"{b[0]} {v}" for b, v in zip(spec, fixed)) + f": cost {r.cost:.2f}, dA {r.x[0]:+.3f}, log10 tau_el {r.x[1]:.3f}, n {10 ** r.x[2]:.3f}  [{time.time() - t0:.0f} s]")
     return apply(sh0, name, np.array(list(r.x) + list(fixed))), r.cost
 
 
+NFIX = 3   # dA, log10 tau_el, log10 n precede the variant's own parameters
+
+
 def apply(sh0, name, p):
-    s = sh0.copy(); s.det = DETS[name]; s.dA = float(p[0]); s.tau_el = 10.0 ** p[1]
+    s = sh0.copy(); s.det = DETS[name]; s.dA = float(p[0]); s.tau_el = 10.0 ** p[1]; s.n = 10.0 ** p[2]
     spec = CANDS[name]
-    s.p1 = 10.0 ** p[2]
-    if len(spec) > 1: s.p2 = p[3] if spec[1][0] == "kappa" else 10.0 ** p[3]
+    if len(spec) > 0: s.p1 = 10.0 ** p[NFIX]
+    if len(spec) > 1: s.p2 = p[NFIX + 1] if spec[1][0] == "kappa" else 10.0 ** p[NFIX + 1]
     return s
 
 
 def fit_candidate(sh0, name, t0):
     spec = CANDS[name]
-    lo = [-6.0, -6.0] + [b[1] for b in spec]; hi = [6.0, -3.0] + [b[2] for b in spec]
-    xs = [0.5, 0.2] + [0.2] * len(spec)
+    lo = [-6.0, -6.0, -0.3] + [b[1] for b in spec]; hi = [6.0, -3.0, 0.5] + [b[2] for b in spec]
+    xs = [0.5, 0.2, 0.05] + [0.2] * len(spec)
     import itertools
-    grid = list(itertools.product(*[b[3] for b in spec]))
+    grid = list(itertools.product(*[b[3] for b in spec])) if spec else [()]
     if QUICK: grid = grid[::max(1, len(grid) // 3)]
-    print(f"\n-- fitting {name}: parameters dA, log10 tau_el, " + ", ".join(b[0] for b in spec) + f"; {len(grid)} grid starts")
+    print(f"\n-- fitting {name}: parameters dA, log10 tau_el, log10 n, " + ", ".join(b[0] for b in spec) + f"; {len(grid)} grid starts")
     best = None
     for g in grid:
-        p0 = np.array([0.0, np.log10(sh0.tau_el)] + list(g))
+        p0 = np.array([0.0, np.log10(sh0.tau_el), np.log10(sh0.n)] + list(g))
         c0 = 0.5 * np.sum(resid(apply(sh0, name, p0)) ** 2)
         r = least_squares(lambda p: resid(apply(sh0, name, p)), p0, bounds=(lo, hi), x_scale=xs, diff_step=2e-2, max_nfev=6 if QUICK else 10)
         print(f"   start {np.round(g, 2).tolist()}: cost {c0:.2f} (dA 0) -> {r.cost:.2f} at x {np.round(r.x, 3).tolist()}  [{time.time() - t0:.0f} s]")
         if best is None or r.cost < best.cost: best = r
     r = least_squares(lambda p: resid(apply(sh0, name, p)), best.x, bounds=(lo, hi), x_scale=xs, diff_step=5e-3, max_nfev=8 if QUICK else 30, xtol=1e-8, ftol=1e-6)
     if r.cost < best.cost: best = r
-    print(f"   {name} best: cost {best.cost:.2f}, " + ", ".join(f"{nm} {v:.3f}" for nm, v in zip(["dA", "log10 tau_el"] + [b[0] for b in spec], best.x)) + f"  [{time.time() - t0:.0f} s]")
+    print(f"   {name} best: cost {best.cost:.2f}, " + ", ".join(f"{nm} {v:.3f}" for nm, v in zip(["dA", "log10 tau_el", "log10 n"] + [b[0] for b in spec], best.x)) + f" (n {10 ** best.x[2]:.3f})  [{time.time() - t0:.0f} s]")
     return apply(sh0, name, best.x), best.cost
 
 
@@ -407,17 +414,18 @@ def main():
     tt = time.time(); r0 = resid(sh); print(f"   one objective evaluation: {len(r0)} residuals, {time.time() - tt:.2f} s, cost {0.5 * np.sum(r0 ** 2):.2f}  [{time.time() - t0:.0f} s]")
     results = {}
     results["baseline"] = full_report(sh, "baseline")
-    names = ONLY or ["rc", "peak", "rms", "slew", "rclevel", "pre"]
+    names = ONLY or ["none", "rc", "peak", "rms", "slew", "rclevel", "pre"]
     for name in names:
-        s, cost = fit_forced(sh, name, t0)
-        results[name + "*"] = full_report(s, name + "* (forced)"); results[name + "*"]["cost"] = cost; results[name + "*"]["shape"] = s
+        if name in FORCED:
+            s, cost = fit_forced(sh, name, t0)
+            results[name + "*"] = full_report(s, name + "* (forced)"); results[name + "*"]["cost"] = cost; results[name + "*"]["shape"] = s
         s, cost = fit_candidate(sh, name, t0)
         results[name] = full_report(s, name); results[name]["cost"] = cost; results[name]["shape"] = s
     print("\n== summary (H rms in dB by frequency; statics/knee/bursts in dB)")
     print(f"   {'variant':10s} {'cost':>7s} | {'H3 100/1k/4k':>16s} | {'H5 100/1k/4k':>16s} | {'H7 100/1k':>10s} | {'gain':>5s} | {'t20':>5s} {'100Hz':>5s} {'3k':>5s} | {'kneeT20':>7s} {'kneeT10':>7s} | {'bursts':>6s} | {'HF-10':>5s} {'HF0':>5s} | parameters")
     for name, r in results.items():
         s = r.get("shape"); h = r["h"]
-        par = "" if s is None else f"dA {s.dA:+.2f} tau_el {s.tau_el * 1e3:.3f} ms p1 {s.p1:.3e} p2 {s.p2:.3e}"
+        par = "" if s is None else f"dA {s.dA:+.2f} tau_el {s.tau_el * 1e3:.3f} ms n {s.n:.3f} p1 {s.p1:.3e} p2 {s.p2:.3e}"
         print(f"   {name:10s} {r.get('cost', 0.5 * np.sum(r0 ** 2)):7.2f} | {h[100][0]:4.1f}/{h[1000][0]:4.1f}/{h[4000][0]:4.1f}     | {h[100][1]:4.1f}/{h[1000][1]:4.1f}/{h[4000][1]:4.1f}     | {h[100][2]:4.1f}/{h[1000][2]:4.1f}  | {r['gain']:5.3f} | "
               f"{r['st'][20][0]:5.3f} {r['st'][100][0]:5.3f} {r['st'][3000][0]:5.3f} | {r['knee'][20][0]:7.3f} {r['knee'][10][0]:7.3f} | {r['bursts'][0]:6.3f} | {r['st']['hf'][-10.0]:5.3f} {r['st']['hf'][0.0]:5.3f} | {par}")
     print(f"   total {time.time() - t0:.0f} s")

@@ -87,10 +87,15 @@ public:
         thrS.reset(c[kc_d_thr_db + cfg.thr]); gainS.reset(c[kc_d_gain_db + cfg.gain]); goffS.reset(c[kc_d_goff_db + cfg.gain]);
     }
 
-    void configure(const DiscreteConfig& nc)
+    void configure(const DiscreteConfig& next)
     {
+        DiscreteConfig nc = next;
         const bool first = !configured;
-        if (!first && nc.ratio != cfg.ratio) { prevRatio = cfg.ratio; fadePos = 0; }
+        if (!first && nc.ratio != cfg.ratio) {
+            if (fadePos < fadeLen) { pendingRatio = nc.ratio; nc.ratio = cfg.ratio; }   // a change during a fade waits for it
+            else { prevRatio = cfg.ratio; fadePos = 0; }
+        }
+        if (!first && nc.recover != cfg.recover) w = v;   // the second node starts level with the first when DUAL is switched
         cfg = nc; configured = true;
         setTimes();
         caStage.set(cfg.ca); noiseAmp = cfg.classA && cfg.noiseDb > -300.0 ? dbToLin(cfg.noiseDb) : 0.0;
@@ -99,6 +104,7 @@ public:
 
     // the channel's sidechain signal (the engine sums the two channels' in stereo before calling process)
     void seed(uint64_t s) { noise.seed(s); }
+    bool filterIn() const { return cfg.scFilter; }
 
     inline double sidechain(double u)
     {
@@ -127,18 +133,23 @@ public:
             w += flow / c2;
         }
         if (kLeak > 0.0) v += (floorDb - v) * kLeak;
+        if (v < rest + 1e-9) v = rest;   // the bleed converges asymptotically: snap, so that rest is exactly reached
         // gain computer
         const double x = v - thr;
         double g = curves[cfg.ratio].at(x);
         if (fadePos < fadeLen) {
             const double t = double(fadePos++) / fadeLen, wf = 0.5 - 0.5 * std::cos(kPi * t);
             g = curves[prevRatio].at(x) * (1.0 - wf) + g * wf;
+            if (fadePos >= fadeLen && pendingRatio >= 0) { prevRatio = cfg.ratio; cfg.ratio = pendingRatio; pendingRatio = -1; fadePos = 0; }
         }
         if (g < 0.0 || v <= rest) g = 0.0;   // at or below the rest point the stage does nothing: exact silence at every ratio
         gr = g;
         // gain cell
         const double a2 = (cfg.hwUnit ? c[kc_d_hwunit_a2] : c[kc_d_a2]) * cfg.a2Scale + cfg.a2Extra * (g * 0.1);
-        const double ui = u + a2 * u * u + c[kc_d_a3] * u * u * u;
+        const double a3 = c[kc_d_a3];
+        const double uf = a3 < 0.0 ? 1.0 / std::sqrt(-3.0 * a3) : 1e30;   // beyond the polynomial's fold it clips instead of inverting
+        const double uc = u > uf ? uf : (u < -uf ? -uf : u);
+        const double ui = uc + a2 * uc * uc + a3 * uc * uc * uc;
         const double cell = ui * dbToLin(-g) + (noiseAmp > 0.0 ? noise.gauss() * noiseAmp : 0.0);   // the cell, then its noise
         const double out = cell * dbToLin(gainS.tick(c[kc_d_gain_db + cfg.gain]));
         return cfg.classA ? caStage.tick(out) : out;   // CLASS A: the output module after make-up
@@ -167,7 +178,7 @@ private:
     double noiseAmp = 0.0;
     double floorDb = -80.0, floorLin = 1e-4, rA = 1.0, invSv = 0.0, kR = 1.0, k2 = 0.0, c2 = 1.0, kLeak = 0.0;
     double v = -80.0, w = -80.0, gr = 0.0;
-    int prevRatio = 0, fadePos = 0, fadeLen = 960;
+    int prevRatio = 0, fadePos = 0, fadeLen = 960, pendingRatio = -1;
 };
 
 } // namespace hvmc

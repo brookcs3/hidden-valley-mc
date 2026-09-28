@@ -4,29 +4,38 @@
 
 Hypothesis under test: what sits between the panel's hard turn-on and the cell smooths the light over about a quarter cycle, so that
 the reference's ripple has a clean 6 dB/octave law (H3: -27.9 / -48.0 / -61.0 dBc at 100 Hz / 1 kHz / 4 kHz, t18 / -10 dBFS) and an H5
-that is not the pulse-train null pattern of the chosen model (9.3 dB rms over the nine 1 kHz items). The candidates are placed AFTER the
-turn-on, so the static knee (the fine sweeps A) is untouched in principle:
+whose null sits where the reference's does. The candidates are placed AFTER the turn-on, so the static knee (the fine sweeps A) is
+untouched in principle:
   (b)  asymmetric phosphor persistence: the light follows the panel drive with one time constant when rising and another, slower, when
        falling (an exponential tail on every light pulse); and a variant whose fall rate speeds up with the light itself;
   (c1) a light-dependent cell response: a one-pole on the light after the turn-on whose rate rises with the illumination (the CdS cell
        speeds up when lit), and separately the same illumination dependence applied to the states' attack (the release is already
-       quenched by the conductance in the chosen model);
+       quenched by the conductance);
   (c2) two cells under one panel: a second conductance in parallel with the three-state cell that sees the light through its own,
-       slower, persistence pole and carries a share of the conductance.
-Each candidate adds two or three parameters. They are fitted together with a global knee shift, a light-gain (logC) trim and the
-rising persistence, everything else held at the chosen model's values (the V6 raw vector of docs/opto-fix.md section 2.3 and the knee
-table of section 4.1, which are the engine's calibration priors), on the 27 opto_harm_t* items (gain, H3, H5, H7), the static level
-series at positions 14, 18, 20, 22 and the nine burst envelopes with the stage-4 weights. The control is the chosen model with the
-same free trims (persistence, knee shift, logC) and nothing added. Reported for each: H3 / H5 / H7 error rms over the 27 items by
-frequency, the static rms at position 20 (33 levels), the fine-knee rms (A) at positions 20 and 10, the burst rms (weighted and plain),
-the 100 Hz static series and the no-GR rows (D).
+       slower, persistence pole and carries a share of the conductance;
+  (c3) the cell law after the integration: the states chase the light (n free) and the conductance is (sum w s)^gamma.
+Each candidate adds two or three parameters. They are fitted together with a global knee shift, a light-gain trim and the rising
+persistence, everything else held at the current fit/data/constants.json values (stage 4 as refitted: n 1.404, gamma 1.342, vth 6.48,
+tau_el 10 us, the three states with 100-255 ms attacks), on the 27 opto_harm_t* items (gain, H3, H5, H7), the static level series at
+positions 14, 18, 20, 22, the 100 Hz series at 20, the fine knees (A) and the nine burst envelopes with the stage-4 weights. The
+control is the current model with the same free trims and nothing added; a second control refits the state constants as well.
+Reported for each: H3 / H5 / H7 error rms over the 27 items by frequency, the static rms at position 20 (33 levels), the fine-knee
+rms (A) at positions 20 and 10, the burst rms (weighted and plain), the 100 Hz static series.
+
+Why the reference's null cannot be a time constant: its H5 minimum is at 6-7 dB of GR at 100 Hz, 1 kHz and 4 kHz alike (items
+t14/-10 and t22/-20 at every frequency), so whatever places it is a function of the conduction angle, not of time. A one-pole on the
+light or an asymmetric persistence is frequency dependent by construction; a level-dependent attack/release rate ratio of states that
+are integrators at every audio frequency (the current constants) is not. The diagnostics print the model's null positions by frequency.
 
 The loop is rendered by a numba mirror of OptoStage::process (the stage-4 mirror with the candidates added; validated against the C++
 engine at the start of the run on the current calibration). Nothing under src/ or fit/stages/ or fit/data/ is written.
-usage: cd <repo> && python3 -u fit/tools/candidates/opto-ripple-asym-phosphor.py [--diag] [--nullscan] [--fit] [--quick]
+usage: cd <repo> && python3 -u fit/tools/candidates/opto-ripple-asym-phosphor.py [--diag] [--nullscan] [--srate] [--fit] [--fs96] [--quick]
   --diag      diagnostics (base model per-item table, level scans, ripple components)
   --nullscan  the anatomy of the model's H5 null (level scans with the state law simplified)
-  --fit       the candidate fits; with no flag everything runs
+  --srate     the 27 items with the loop at 48 / 96 / 192 kHz on the mirror and through the engine at quality 0 / 1
+  --fit       the candidate fits at 48 kHz
+  --fs96      the reduced candidate list with the loop at 96 kHz
+  with no flag: diag, nullscan, srate and fit (about 12 minutes on 16 cores); --fs96 must be asked for
 """
 import json, os, sys, time, numpy as np
 from numba import njit, prange
@@ -46,15 +55,9 @@ def cget(name, i=0): return float(cal_now[MODEL.fields[name][0] + i])
 G0 = cget("o_gain_db", 11) + cget("x_gain_db", 0)     # make-up at position 12 plus the Nickel path's midband gain, dB
 G0_LIN = 10.0 ** (G0 / 20.0)
 
-# the chosen model (docs/opto-fix.md 2.3 raw V6 vector and the section 4.1 knee table = the engine's priors), in the C++ terms
-V6 = dict(logC=0.804515, p=1.657263, log_tau_el=-4.177286, w=(0.29804, 0.787815, 0.249402), la=(-2.073795, -1.803165, -2.068737),
-          lr=(-0.756595, -0.879338, -1.027291), logb=-1.694579, q=2.154234, logmuc=0.885802)
-THR_TABLE = np.array([-9.4, -1.43, 6.27, 11.37, 15.54, 17.99, 20.26, 22.41, 24.53, 26.62, 28.63, 29.57, 30.56, 31.48, 32.46, 33.39, 34.37,
-                      35.32, 36.30, 37.28, 38.29, 39.32, 40.40, 41.36])
-LP = (5147.0, 0.718)
 KINDS = {0: "control (symmetric persistence)", 1: "(b) asymmetric persistence rise/fall", 2: "(b') asymmetric, fall rate x (1 + kappa L)",
          3: "(c1) light-dependent cell low pass after the turn-on", 4: "(c1') illumination-dependent state attack",
-         5: "(c2) second cell in parallel with its own persistence", 6: "(c3) cell law after the integration: states chase the light, cond = (sum w s)^gamma",
+         5: "(c2) second cell in parallel with its own persistence", 6: "(c3) cell law after the integration: states chase the light (n, gamma free), cond = (sum w s)^gamma",
          7: "(c3+b) cell law after the integration with an asymmetric persistence",
          8: "(c4) release quench with a free exponent: rate (1 + mu s^rho) / trel", 9: "(c5) state attack slowing with conductance: rate 1 / (tatt (1 + kappa s))",
          10: "(c6) excursion-dependent attack: rate (1 + beta (target - s)) / (tatt scale): fast on a step, slow on the ripple"}
@@ -210,22 +213,14 @@ def env_batch(Y, X, lens, fs, f, out, counts):
 class Shape:
     """the optical stage's parameters in the C++ calibration's terms plus the candidate (kind, p1, p2, p3)"""
     def __init__(self, cal=None):
-        if cal is None:
-            self.b2, self.b3 = cget("o_b2"), cget("o_b3")
-            self.thr = THR_TABLE.copy(); self.n = 1.0; self.gam = V6["p"]; C = 10.0 ** V6["logC"]; self.vth = C ** (1.0 / self.gam)
-            self.tau_r = 10.0 ** V6["log_tau_el"]
-            w = np.abs(np.array(V6["w"])); self.w = w / w.sum()
-            self.tatt = 10.0 ** np.array(V6["la"]); self.trel = 10.0 ** np.array(V6["lr"])
-            self.mu = 10.0 ** V6["logmuc"]; self.leak = 10.0 ** V6["logb"]; self.leak_q = V6["q"]
-            self.fc, self.Q = LP
-        else:
-            g = lambda name, i=0: float(cal[MODEL.fields[name][0] + i])
-            self.b2, self.b3 = g("o_b2"), g("o_b3")
-            self.thr = np.array(cal[MODEL.field("o_thr_db")], dtype=float).copy()
-            self.n, self.gam, self.vth, self.tau_r = g("o_n"), g("o_gamma"), g("o_vth"), g("o_tau_el")
-            self.w = np.array([g("o_w", i) for i in range(3)]); self.tatt = np.array([g("o_tatt", i) for i in range(3)]); self.trel = np.array([g("o_trel", i) for i in range(3)])
-            self.mu, self.leak, self.leak_q = g("o_rel_mu"), g("o_leak"), g("o_leak_q")
-            self.fc, self.Q = g("o_sc_lp_hz"), g("o_sc_lp_q")
+        cal = cal_now if cal is None else cal        # the current fit/data/constants.json is the baseline
+        g = lambda name, i=0: float(cal[MODEL.fields[name][0] + i])
+        self.b2, self.b3 = g("o_b2"), g("o_b3")
+        self.thr = np.array(cal[MODEL.field("o_thr_db")], dtype=float).copy()
+        self.n, self.gam, self.vth, self.tau_r = g("o_n"), g("o_gamma"), g("o_vth"), g("o_tau_el")
+        self.w = np.array([g("o_w", i) for i in range(3)]); self.tatt = np.array([g("o_tatt", i) for i in range(3)]); self.trel = np.array([g("o_trel", i) for i in range(3)])
+        self.mu, self.leak, self.leak_q = g("o_rel_mu"), g("o_leak"), g("o_leak_q")
+        self.fc, self.Q = g("o_sc_lp_hz"), g("o_sc_lp_q")
         self.kind, self.p1, self.p2, self.p3 = 0, 0.0, 0.0, 1.0
         self.shift = 0.0        # global knee shift, dB (added to every o_thr_db)
         self.dlogC = 0.0        # light gain trim: multiplies the light by 10^(dlogC / gam) (i.e. C by 10^dlogC)
@@ -236,16 +231,22 @@ class Shape:
     def thr_db(self, k): return float(self.thr[k - 1]) + self.shift
     def knee(self, k): return 20.0 * np.log10(self.vth) - self.thr_db(k)
     def cond0(self, k): return self.leak * 10.0 ** (self.leak_q * (self.thr_db(k) - self.thr_db(20)) / 20.0)
+    def law(self):
+        """(n, gamma) in force: kinds 6/7 carry their own pair in p1/p2 when set"""
+        if self.kind == 6 and self.p1 > 0.0: return float(self.p1), float(self.p2)
+        return float(self.n), float(self.gam)
+
     def leak_light(self, k):
-        c0 = self.cond0(k); return c0 ** (1.0 / self.gam) if c0 > 0.0 else 0.0
+        c0 = self.cond0(k); gam = self.law()[1]; return c0 ** (1.0 / gam) if c0 > 0.0 else 0.0
 
     def render(self, X, lens, thrs, fs=FSF, Y=None, Cd=None):
         # the light gain trim is applied as a drive scale on (d - vth) and on L0: light' = light * 10^(dlogC/gam) == C' = C 10^dlogC
-        gl = 10.0 ** (self.dlogC / self.gam)
+        n, gam = self.law()
+        gl = 10.0 ** (self.dlogC / gam)
         A = np.array([gl * 10.0 ** (self.thr_db(k) / 20.0) for k in thrs]); L0 = np.array([gl * self.leak_light(k) for k in thrs])
         if Y is None: Y = np.zeros_like(X)
         if Cd is None: Cd = np.zeros_like(X)
-        run_batch(X, lens, fs, A, gl * self.vth, self.n, self.gam, self.tau_r, self.w, self.tatt, self.trel, L0, self.mu, self.b2, self.b3, self.fc, self.Q,
+        run_batch(X, lens, fs, A, gl * self.vth, n, gam, self.tau_r, self.w, self.tatt, self.trel, L0, self.mu, self.b2, self.b3, self.fc, self.Q,
                   int(self.kind), float(self.p1), float(self.p2), float(self.p3), Y, Cd)
         return Y
 
@@ -262,19 +263,21 @@ def amax(e):
 
 # ------------------------------------------------------------------------------------------------ batches of protocol items
 class Batch:
-    def __init__(self, ids, secs=None):
+    """protocol items rendered together on the mirror; `fs` overrides the loop's sample rate (the stimulus is generated and the
+    features are taken at that rate, so the reference features compare directly)"""
+    def __init__(self, ids, secs=None, fs=None):
         self.ids = ids
+        self.fs = float(fs if fs is not None else ITEMS[ids[0]]["fs"])
         xs = []
         for i in ids:
             st = dict(ITEMS[i]["stim"])
             if secs is not None and st["kind"] == "sine": st["secs"] = secs
-            xs.append(protocol.stimulus(st, ITEMS[i]["fs"])[0])
+            xs.append(protocol.stimulus(st, int(self.fs))[0])
         self.lens = np.array([len(x) for x in xs]); self.X = np.zeros((len(ids), self.lens.max()))
         for j, x in enumerate(xs): self.X[j, :len(x)] = x
         self.Y = np.zeros_like(self.X); self.C = np.zeros_like(self.X)
         self.thr = [int(ITEMS[i]["set"]["optical_threshold"]) for i in ids]
         self.freqs = np.array([float(ITEMS[i]["stim"]["f"]) for i in ids])
-        self.fs = float(ITEMS[ids[0]]["fs"])
 
     def gains(self, sh, last_s=0.5):
         sh.render(self.X, self.lens, self.thr, self.fs, self.Y, self.C)
@@ -330,41 +333,42 @@ def validate():
             m = b.harms(sh)[0]; d = max(abs(m["gain_db"] - e["gain_db"]), abs(m["h"][1] - e["h"][1]), abs(m["h"][3] - e["h"][3]))
         worst = max(worst, d)
         print(f"  mirror vs engine {i}: max |diff| {d:.4f} dB")
-    print(f"  (the current constants.json: vth {sh.vth:.3f}, gamma {sh.gam:.3f}, tau_el {sh.tau_r * 1e3:.4f} ms; the run below uses the chosen model of docs/opto-fix.md)")
+    print(f"  baseline = the current constants.json: n {sh.n:.3f} gamma {sh.gam:.3f} vth {sh.vth:.3f} tau_el {sh.tau_r * 1e6:.1f} us | w {np.round(sh.w, 3).tolist()} attack ms {np.round(sh.tatt * 1e3, 1).tolist()} release ms {np.round(sh.trel * 1e3, 1).tolist()} mu {sh.mu:.2f} | leak {sh.leak:.4f} q {sh.leak_q:.3f} | LP {sh.fc:.0f} Hz Q {sh.Q:.3f}")
     if worst > 0.05: print("!! the mirror does not reproduce the engine; stopping"); sys.exit(1)
 
 
 # ------------------------------------------------------------------------------------------------ scoring
 class Scorer:
-    def __init__(self, quick=False):
-        self.bh = Batch(HARM_IDS)                                                   # protocol lengths (3 s, last 1 s)
-        self.bh_fit = Batch(HARM_IDS, secs=1.5)                                     # shorter renders for the fit (last 0.5 s)
-        self.bs20 = Batch([f"opto_static_t20_{l}" for l in LEVELS])
+    def __init__(self, quick=False, fs=None):
+        self.fsx = float(fs if fs is not None else FS); fsx = self.fsx        # the loop's sample rate for every batch (48 kHz = the protocol's)
+        self.bh = Batch(HARM_IDS, fs=fsx)                                           # protocol lengths (3 s, last 1 s)
+        self.bh_fit = Batch(HARM_IDS, secs=1.5, fs=fsx)                             # shorter renders for the fit (last 0.5 s)
+        self.bs20 = Batch([f"opto_static_t20_{l}" for l in LEVELS], fs=fsx)
         fit_lv = LEVELS[::2] if quick else LEVELS
         self.stat_fit_ids = [f"opto_static_t{k}_{l}" for k in (14, 18, 20, 22) for l in fit_lv]
-        self.bs_fit = Batch(self.stat_fit_ids, secs=1.5)
-        self.bb = Batch(BURSTS)
-        self.b100 = Batch([f"opto_static_f100_{l}" for l in range(-40, 11, 2)])
-        self.b100_fit = Batch([f"opto_static_f100_{l}" for l in range(-40, 11, 4)], secs=1.5)   # guard: the 100 Hz statics must stay with the 1 kHz ones
-        # fine knee sweeps (A) and the no-GR rows (D)
+        self.bs_fit = Batch(self.stat_fit_ids, secs=1.5, fs=fsx)
+        self.bb = Batch(BURSTS, fs=fsx)
+        self.b100 = Batch([f"opto_static_f100_{l}" for l in range(-40, 11, 2)], fs=fsx)
+        self.b100_fit = Batch([f"opto_static_f100_{l}" for l in range(-40, 11, 4)], secs=1.5, fs=fsx)   # guard: the 100 Hz statics must stay with the 1 kHz ones
+        # fine knee sweeps (A)
         self.knee = {}
         for thr in ("20", "10"):
-            kd = DISC["knee"][thr]; lv = np.array(kd["levels"]); n = int(3.0 * FS); t = np.arange(n) / FS
+            kd = DISC["knee"][thr]; lv = np.array(kd["levels"]); n = int(3.0 * fsx); t = np.arange(n) / fsx
             X = np.array([10 ** (l / 20) * np.sin(2 * np.pi * 1000.0 * t) for l in lv])
             self.knee[thr] = (lv, np.array(kd["gain_db"]), X, np.full(len(lv), n, dtype=np.int64), np.zeros_like(X), np.zeros_like(X))
         self.ref_h = [F[i] for i in HARM_IDS]
         # the fine sweeps again at 1.5 s for the fit residual
         self.knee_fit = {}
         for thr in ("20", "10"):
-            kd = DISC["knee"][thr]; lv = np.array(kd["levels"]); n = int(1.5 * FS); t = np.arange(n) / FS
+            kd = DISC["knee"][thr]; lv = np.array(kd["levels"]); n = int(1.5 * fsx); t = np.arange(n) / fsx
             X = np.array([10 ** (l / 20) * np.sin(2 * np.pi * 1000.0 * t) for l in lv])
             self.knee_fit[thr] = (lv, np.array(kd["gain_db"]), X, np.full(len(lv), n, dtype=np.int64), np.zeros_like(X), np.zeros_like(X))
 
     def knee_resid(self, sh, fit=True):
-        out = []
+        out = []; h = int(self.fsx) // 2
         for thr, (lv, gref, X, lens, Y, Cd) in (self.knee_fit if fit else self.knee).items():
-            sh.render(X, lens, [int(thr)] * len(lv), FSF, Y, Cd)
-            g = np.array([20 * np.log10(np.sqrt(np.mean(Y[j, -FS // 2:] ** 2)) / np.sqrt(np.mean(X[j, -FS // 2:] ** 2))) for j in range(len(lv))]) + G0
+            sh.render(X, lens, [int(thr)] * len(lv), self.fsx, Y, Cd)
+            g = np.array([20 * np.log10(np.sqrt(np.mean(Y[j, -h:] ** 2)) / np.sqrt(np.mean(X[j, -h:] ** 2))) for j in range(len(lv))]) + G0
             out.append(g - gref)
         return np.concatenate(out)
 
@@ -396,7 +400,7 @@ class Scorer:
 
     def report(self, sh, label, items=False):
         E, ms = self.harm_errors(sh)
-        print(f"\n== {label}")
+        print(f"\n== {label}  [loop at {self.fsx / 1e3:g} kHz]")
         print(f"   kind {sh.kind} [{KINDS[sh.kind]}] p1 {sh.p1:.4g} p2 {sh.p2:.4g} p3 {sh.p3:.4g} | tau_rise {sh.tau_r * 1e6:.1f} us | knee shift {sh.shift:+.3f} dB | dlogC {sh.dlogC:+.4f}")
         by_f = {}
         for f in (100, 1000, 4000):
@@ -419,10 +423,10 @@ class Scorer:
             n = min(len(m), len(F[i])); d = np.array(m[:n]) - np.array(F[i][:n]); allw.append(burst_weight(i, n) * d); allp.append(d); per.append(rms(d))
         bw = rms(np.concatenate(allw)); bp = rms(np.concatenate(allp))
         # fine knees
-        kn = {}
+        kn = {}; h = int(self.fsx)
         for thr, (lv, gref, X, lens, Y, Cd) in self.knee.items():
-            sh.render(X, lens, [int(thr)] * len(lv), FSF, Y, Cd)
-            g = np.array([20 * np.log10(np.sqrt(np.mean(Y[j, -FS:] ** 2)) / np.sqrt(np.mean(X[j, -FS:] ** 2))) for j in range(len(lv))]) + G0
+            sh.render(X, lens, [int(thr)] * len(lv), self.fsx, Y, Cd)
+            g = np.array([20 * np.log10(np.sqrt(np.mean(Y[j, -h:] ** 2)) / np.sqrt(np.mean(X[j, -h:] ** 2))) for j in range(len(lv))]) + G0
             grm = g[0] - g; grr = gref[0] - gref
             cm = [float(np.interp(v, grm, lv)) for v in (0.5, 3.0)]; cr = [float(np.interp(v, grr, lv)) for v in (0.5, 3.0)]
             kn[thr] = (rms(g - gref), float(np.max(np.abs(g - gref))), cm[1] - cm[0], cr[1] - cr[0], cm[0], cr[0])
@@ -436,10 +440,10 @@ class Scorer:
 # ------------------------------------------------------------------------------------------------ diagnostics
 def diagnostics(S):
     base = Shape()
-    print("\n1. the chosen model, per item (V6 raw vector, section 4.1 knee table, matched low pass 5147 Hz Q 0.718)")
-    S.report(base, "control, tau_el 66.5 us (V6)", items=True)
-    b2 = base.copy(); b2.tau_r = 1e-5
-    S.report(b2, "control, tau_el 10 us (no refit)", items=True)
+    print("\n1. the current model, per item (fit/data/constants.json)")
+    S.report(base, "baseline, constants.json as is", items=True)
+    b2 = base.copy(); b2.tau_r = 2e-6
+    S.report(b2, "baseline with the persistence pole removed (tau_el 2 us, no refit)", items=True)
     # the ripple components of the conductance, model, and what the reference's harmonics imply
     print("\n2. conductance ripple of the chosen model (2f / 4f / 6f components relative to the mean conductance, dB) against the reference's H3/H5/H7")
     print("   for a slow gain ripple the sideband law is H(2k+1) ~ c_2k / (2 (1 + c0)) to first order; the last column is that first-order H3 from c2")
@@ -454,7 +458,7 @@ def diagnostics(S):
         lv = np.arange(-30.0, 8.1, 2.0); n = int(1.5 * FS); t = np.arange(n) / FS
         X = np.array([10 ** (l / 20) * np.sin(2 * np.pi * f * t) for l in lv]); lens = np.full(len(lv), n, dtype=np.int64)
         Y = np.zeros_like(X); Cd = np.zeros_like(X)
-        for sh, lab in ((base, "66.5 us"), (b2, "10 us")):
+        for sh, lab in ((base, "as is"), (b2, "no pole")):
             sh.render(X, lens, [20] * len(lv), FSF, Y, Cd)
             H = np.zeros((len(lv), 8), dtype=np.complex128); harm_batch(Y, lens, FSF, np.full(len(lv), f), 0.5, H)
             a = np.abs(H); g = 20 * np.log10(a[:, 0] + 1e-30) - lv + G0; gr = g[0] - g
@@ -478,16 +482,16 @@ def null_scan(S):
     """where does the model's H5 null come from: level scans at position 20, 1 kHz, with the state law simplified step by step"""
     print("\n5. H5 / c4 null anatomy at position 20, 1 kHz: GR, H5 and the conductance's 4f/2f ratio (dB) against level, per variant")
     base = Shape()
-    variants = [("chosen model", base)]
+    variants = [("current model", base)]
     v = base.copy(); v.mu = 0.0; v.trel = v.tatt.copy(); variants.append(("linear symmetric states (mu 0, trel = tatt)", v))
     v = base.copy(); v.mu = 0.0; variants.append(("mu 0 (attack faster than release everywhere)", v))
     v = base.copy(); v.tau_r = 1e-6; variants.append(("no persistence pole", v))
     v = base.copy(); v.mu = 0.0; v.trel = v.tatt.copy(); v.tau_r = 1e-6; variants.append(("linear symmetric states, no pole", v))
     v = base.copy(); v.trel = v.tatt / 3.0; v.mu = 0.0; variants.append(("mu 0, release 3x faster than attack", v))
     v = base.copy(); v.kind = 6; variants.append(("(c3) cell law after the integration, constants as is", v))
-    for k in (2.0, 3.0, 5.0):
+    for k in (0.3, 0.5, 2.0):
         v = base.copy(); v.tatt = v.tatt * k; variants.append((f"attack constants x {k:g} (release-dominated asymmetry at lower GR)", v))
-    v = base.copy(); v.tatt = v.tatt * 3.0; v.tau_r = 1e-5; variants.append(("attack constants x 3, persistence 10 us", v))
+    v = base.copy(); v.tatt = v.tatt * 0.5; v.tau_r = 2e-6; variants.append(("attack constants x 0.5, no persistence pole", v))
     lv = np.arange(-30.0, 8.1, 2.0); n = int(1.5 * FS); t = np.arange(n) / FS; f = 1000.0
     X = np.array([10 ** (l / 20) * np.sin(2 * np.pi * f * t) for l in lv]); lens = np.full(len(lv), n, dtype=np.int64)
     Y = np.zeros_like(X); Cd = np.zeros_like(X)
@@ -506,10 +510,50 @@ def null_scan(S):
         print("      H3:    " + " ".join(f"{x:6.1f}" for x in h3))
         print("      H5:    " + " ".join(f"{x:6.1f}" for x in h5))
         print("      c4/c2: " + " ".join(f"{x:6.1f}" for x in r))
-    print("\n   and the full report for the slow-attack variants (no other change):")
-    for k in (2.0, 3.0):
-        v = base.copy(); v.tatt = v.tatt * k; S.report(v, f"attack constants x {k:g}", items=(k == 3.0))
-    v = base.copy(); v.tatt = v.tatt * 3.0; v.tau_r = 1e-5; S.report(v, "attack constants x 3, persistence 10 us", items=False)
+    print("\n   and the full report for the attack-scaled variants (no other change):")
+    for k in (0.5, 2.0):
+        v = base.copy(); v.tatt = v.tatt * k; S.report(v, f"attack constants x {k:g}", items=False)
+    v = base.copy(); v.mu = 0.0; S.report(v, "release quench removed (mu 0), no other change", items=False)
+
+
+# ------------------------------------------------------------------------------------------------ the loop's sample rate
+def srate_scan():
+    """the 27 items on the mirror with the loop at 48, 96 and 192 kHz (same constants), and through the engine at quality 0 and 1
+    (2x oversampling wraps the optical stage): a hard turn-on on a rectified 4 kHz sine has light harmonics at 8k, 16k, 24k, 32k...
+    which alias in a 48 kHz loop; the 4f component (16 kHz) is what H5 carries"""
+    print("\n6. the loop's sample rate: the current constants, 27 items, mirror at 48 / 96 / 192 kHz (model / ref dBc; error rms by frequency)")
+    sh = Shape()
+    for fs in (48000, 96000, 192000):
+        b = Batch(HARM_IDS, fs=fs); ms = b.harms(sh)
+        E = {100: [[], [], [], []], 1000: [[], [], [], []], 4000: [[], [], [], []]}
+        line = []
+        for iid, m in zip(HARM_IDS, ms):
+            r = F[iid]; f = int(ITEMS[iid]["stim"]["f"])
+            E[f][0].append(m["gain_db"] - r["gain_db"])
+            for k, idx in enumerate((1, 3, 5)):
+                if m["h"][idx] is not None and r["h"][idx] is not None and r["h"][idx] > -100: E[f][k + 1].append(m["h"][idx] - r["h"][idx])
+            if f == 4000 and r["h"][3] > -100: line.append(f"{iid[10:-6]} {m['h'][3]:.1f}/{r['h'][3]:.1f}")
+        print(f"   loop at {fs / 1e3:g} kHz: " + " | ".join(f"{f} Hz H3 {rms(E[f][1]):.2f} H5 {rms(E[f][2]):.2f} H7 {rms(E[f][3]):.2f} gain {rms(E[f][0]):.3f}" for f in (100, 1000, 4000)))
+        print("      4 kHz H5 by item: " + ", ".join(line))
+    print("   through the C++ engine at 48 kHz, quality 0 (no oversampling) and 1 (2x, the optical stage inside): 1 kHz and 4 kHz items")
+    ids = [i for i in HARM_IDS if i.endswith("_f1000") or i.endswith("_f4000")]
+    for q in (0, 1):
+        E = {1000: [[], []], 4000: [[], []]}; line = []
+        for iid in ids:
+            m = render_item(ITEMS[iid], cal_now, quality=q); r = F[iid]; f = int(ITEMS[iid]["stim"]["f"])
+            if r["h"][3] > -100: E[f][0].append(m["h"][1] - r["h"][1]); E[f][1].append(m["h"][3] - r["h"][3])
+            if f == 4000 and r["h"][3] > -100: line.append(f"{iid[10:-6]} {m['h'][3]:.1f}/{r['h'][3]:.1f}")
+        print(f"   engine quality {q}: " + " | ".join(f"{f} Hz H3 {rms(E[f][0]):.2f} H5 {rms(E[f][1]):.2f}" for f in (1000, 4000)) + "\n      4 kHz H5 by item: " + ", ".join(line))
+    print("   4 kHz level scan at position 20, H5 against GR, loop at 48 kHz and at 192 kHz (the reference's minimum is at 6-7 dB of GR at every frequency):")
+    for fs in (48000, 192000):
+        lv = np.arange(-30.0, 8.1, 2.0); n = int(1.5 * fs); t = np.arange(n) / fs; f = 4000.0
+        X = np.array([10 ** (l / 20) * np.sin(2 * np.pi * f * t) for l in lv]); lens = np.full(len(lv), n, dtype=np.int64)
+        Y = np.zeros_like(X); Cd = np.zeros_like(X)
+        sh.render(X, lens, [20] * len(lv), float(fs), Y, Cd)
+        H = np.zeros((len(lv), 8), dtype=np.complex128); harm_batch(Y, lens, float(fs), np.full(len(lv), f), 0.5, H)
+        a = np.abs(H); g = 20 * np.log10(a[:, 0] + 1e-30) - lv + G0; gr = g[0] - g
+        print(f"      {fs / 1e3:3g} kHz  GR: " + " ".join(f"{v:6.1f}" for v in gr))
+        print(f"               H5: " + " ".join(f"{v:6.1f}" for v in 20 * np.log10(a[:, 4] / (a[:, 0] + 1e-30) + 1e-30)))
 
 
 # ------------------------------------------------------------------------------------------------ candidate fits
@@ -526,6 +570,7 @@ def fit_candidate(S, kind, p0, lo, hi, xs, label, dyn=False, max_nfev=40):
         if kind == 3: s.p1 = 10.0 ** ps[0]; s.p2 = 10.0 ** ps[1]
         if kind == 4: s.p1 = 10.0 ** ps[0]; s.p2 = ps[1]
         if kind == 5: s.p1 = ps[0]; s.p2 = 10.0 ** ps[1]; s.p3 = 10.0 ** ps[2]
+        if kind == 6: s.p1 = ps[0]; s.p2 = ps[1]
         if kind == 7: s.p1 = 10.0 ** ps[0]
         if kind == 8: s.p1 = ps[0]
         if kind == 9: s.p1 = 10.0 ** ps[0]; s.p2 = ps[1]
@@ -551,6 +596,7 @@ def fit_candidate(S, kind, p0, lo, hi, xs, label, dyn=False, max_nfev=40):
 def main():
     quick = "--quick" in sys.argv; only = [a for a in sys.argv[1:] if a.startswith("--") and a != "--quick"]
     do_diag = "--diag" in only or not only; do_fit = "--fit" in only or not only; do_null = "--nullscan" in only or not only
+    do_srate = "--srate" in only or not only; do_fs96 = "--fs96" in only
     t0 = time.time()
     print(f"G0 {G0:.3f} dB, b2 {cget('o_b2'):.2e} b3 {cget('o_b3'):.2e}; {os.cpu_count()} cpus")
     validate()
@@ -561,31 +607,58 @@ def main():
         print(f"\n  diagnostics done [{time.time() - t0:.0f} s]")
     if do_null:
         null_scan(S)
+    if do_srate:
+        srate_scan()
+        print(f"\n  sample-rate scan done [{time.time() - t0:.0f} s]")
+    if do_fs96:
+        # the candidates again with the loop at 96 kHz (the aliasing of the 4 kHz items removed): the reduced list
+        S = Scorer(quick=quick, fs=96000); results = {}
+        base = Shape(); r0 = S.resid(base)
+        print(f"\n7. the loop at 96 kHz: cost of the current model under the fit weights: {0.5 * float(np.sum(r0 ** 2)):.1f}")
+        results["baseline"] = S.report(base, "the current model as is (no fit)", items=True)
+        s, _ = fit_candidate(S, 0, [], [], [], [], "control: tau_el, knee shift, light trim only")
+        results["control"] = S.report(s, "control refit (tau_el, knee shift, light trim)", items=False)
+        s, _ = fit_candidate(S, 1, [np.log10(1e-4)], [-5.5], [-2.5], [0.1], "(b) asym persistence: tau_fall")
+        results["b"] = S.report(s, "(b) asymmetric persistence", items=False)
+        s, _ = fit_candidate(S, 4, [np.log10(1.0), 1.0], [-2.0, 0.2], [2.0, 5.0], [0.2, 0.1], "(c1') state attack rate x (1 + mu_a s), tatt scale")
+        results["c1b"] = S.report(s, "(c1') illumination-dependent state attack", items=False)
+        s, _ = fit_candidate(S, 5, [0.3, np.log10(3e-4), 0.0], [0.02, -5.5, -1.5], [0.9, -2.0, 1.5], [0.05, 0.1, 0.1], "(c2) second cell, share / persistence / speed")
+        results["c2"] = S.report(s, "(c2) second cell in parallel with its own persistence", items=False)
+        s, _ = fit_candidate(S, 0, [], [], [], [], "control + dynamics refit (w, tatt, trel, mu)", dyn=True, max_nfev=60)
+        results["ctrl-dyn"] = S.report(s, "control with the state constants refitted", items=True)
+        s, _ = fit_candidate(S, 4, [np.log10(1.0), 1.0], [-2.0, 0.2], [2.0, 5.0], [0.2, 0.1], "(c1') illumination-dependent attack, dynamics refitted", dyn=True, max_nfev=60)
+        results["c1b-dyn"] = S.report(s, "(c1') illumination-dependent state attack with the state constants refitted", items=True)
+        print("\n== summary at 96 kHz (H3 / H5 / H7 error rms over the 27 items; statics t20; fine knee t20/t10; bursts weighted/plain)")
+        for k, v in results.items():
+            print(f"   {k:8s} H3 {v['h3all']:.2f} (100 Hz {v['h3'][100][0]:.2f}, 1 kHz {v['h3'][1000][0]:.2f}, 4 kHz {v['h3'][4000][0]:.2f}) | H5 {v['h5all']:.2f} ({v['h3'][100][1]:.1f}, {v['h3'][1000][1]:.1f}, {v['h3'][4000][1]:.1f}) | "
+                  f"H7 {v['h7all']:.2f} | stat t20 {v['stat20']:.3f} | 100 Hz {v['s100']:.3f} | knee {v['kn20']:.3f}/{v['kn10']:.3f} | bursts {v['bw']:.4f}/{v['bp']:.3f}")
     if do_fit:
         results = {}
         base = Shape(); r0 = S.resid(base)
-        print(f"   cost of the chosen model under the fit weights: {0.5 * float(np.sum(r0 ** 2)):.1f}")
-        results["chosen"] = S.report(base, "the chosen model as is (no fit)", items=False)
-        s, _ = fit_candidate(S, 0, [], [], [], [], "control: tau_el, knee shift, logC only")
-        results["control"] = S.report(s, "control refit (tau_el, knee shift, logC)", items=False)
-        s, _ = fit_candidate(S, 1, [np.log10(2e-4)], [-5.0], [-2.5], [0.1], "(b) asym persistence: tau_fall")
-        results["b"] = S.report(s, "(b) asymmetric persistence", items=False)
-        s, _ = fit_candidate(S, 2, [np.log10(2e-4), np.log10(1.0)], [-5.0, -3.0], [-2.5, 3.0], [0.1, 0.2], "(b') asym persistence, fall rate x (1 + kappa L)")
+        print(f"   cost of the current model under the fit weights: {0.5 * float(np.sum(r0 ** 2)):.1f}")
+        results["baseline"] = S.report(base, "the current model as is (no fit)", items=False)
+        s, _ = fit_candidate(S, 0, [], [], [], [], "control: tau_el, knee shift, light trim only")
+        results["control"] = S.report(s, "control refit (tau_el, knee shift, light trim)", items=False)
+        s, _ = fit_candidate(S, 1, [np.log10(1e-4)], [-5.5], [-2.5], [0.1], "(b) asym persistence: tau_fall")
+        results["b"] = S.report(s, "(b) asymmetric persistence", items=True)
+        s, _ = fit_candidate(S, 2, [np.log10(1e-4), np.log10(1.0)], [-5.5, -3.0], [-2.5, 3.0], [0.1, 0.2], "(b') asym persistence, fall rate x (1 + kappa L)")
         results["b2"] = S.report(s, "(b') asymmetric persistence with light-dependent fall", items=False)
-        s, _ = fit_candidate(S, 3, [np.log10(2e-4), np.log10(1.0)], [-5.0, -3.0], [-2.0, 3.0], [0.1, 0.2], "(c1) cell low pass, rate x (1 + kappa Lc)")
+        s, _ = fit_candidate(S, 3, [np.log10(1e-4), np.log10(1.0)], [-5.5, -3.0], [-2.0, 3.0], [0.1, 0.2], "(c1) cell low pass, rate x (1 + kappa Lc)")
         results["c1"] = S.report(s, "(c1) light-dependent cell low pass after the turn-on", items=False)
         s, _ = fit_candidate(S, 4, [np.log10(1.0), 1.0], [-2.0, 0.2], [2.0, 5.0], [0.2, 0.1], "(c1') state attack rate x (1 + mu_a s), tatt scale")
         results["c1b"] = S.report(s, "(c1') illumination-dependent state attack", items=True)
-        s, _ = fit_candidate(S, 5, [0.3, np.log10(3e-4), 0.0], [0.02, -5.0, -1.5], [0.9, -2.0, 1.5], [0.05, 0.1, 0.1], "(c2) second cell, share / persistence / speed")
-        results["c2"] = S.report(s, "(c2) second cell in parallel with its own persistence", items=False)
-        s, _ = fit_candidate(S, 10, [np.log10(3.0), np.log10(3.0)], [-1.0, 0.0], [2.5, 1.5], [0.2, 0.1], "(c6) excursion-dependent attack: beta, tatt scale", max_nfev=60)
-        results["c6"] = S.report(s, "(c6) excursion-dependent attack (fast on a step, slow on the ripple)", items=True)
-        s, _ = fit_candidate(S, 10, [np.log10(3.0), np.log10(3.0)], [-1.0, 0.0], [2.5, 1.5], [0.2, 0.1], "(c6) excursion-dependent attack, dynamics refitted", dyn=True, max_nfev=100)
-        results["c6-dyn"] = S.report(s, "(c6) excursion-dependent attack with the state constants refitted", items=True)
-        s, _ = fit_candidate(S, 8, [1.0], [0.3], [2.0], [0.05], "(c4) quench exponent rho, dynamics refitted", dyn=True, max_nfev=100)
-        results["c4"] = S.report(s, "(c4) release quench with a free exponent", items=False)
-        s, _ = fit_candidate(S, 6, [], [], [], [], "(c3) cell law after the integration, dynamics refitted", dyn=True, max_nfev=100)
-        results["c3"] = S.report(s, "(c3) cell law after the integration: states chase the light, cond = (sum w s)^gamma", items=False)
+        s, _ = fit_candidate(S, 9, [np.log10(0.3), 1.0], [-2.0, 0.2], [1.5, 5.0], [0.2, 0.1], "(c5) state attack slowing with conductance, tatt scale")
+        results["c5"] = S.report(s, "(c5) state attack slowing with conductance", items=False)
+        s, _ = fit_candidate(S, 5, [0.3, np.log10(3e-4), 0.0], [0.02, -5.5, -1.5], [0.9, -2.0, 1.5], [0.05, 0.1, 0.1], "(c2) second cell, share / persistence / speed")
+        results["c2"] = S.report(s, "(c2) second cell in parallel with its own persistence", items=True)
+        s, _ = fit_candidate(S, 0, [], [], [], [], "control + dynamics refit (w, tatt, trel, mu)", dyn=True, max_nfev=80)
+        results["ctrl-dyn"] = S.report(s, "control with the state constants refitted", items=True)
+        s, _ = fit_candidate(S, 4, [np.log10(1.0), 1.0], [-2.0, 0.2], [2.0, 5.0], [0.2, 0.1], "(c1') illumination-dependent attack, dynamics refitted", dyn=True, max_nfev=80)
+        results["c1b-dyn"] = S.report(s, "(c1') illumination-dependent state attack with the state constants refitted", items=True)
+        s, _ = fit_candidate(S, 5, [0.3, np.log10(3e-4), 0.0], [0.02, -5.5, -1.5], [0.9, -2.0, 1.5], [0.05, 0.1, 0.1], "(c2) second cell, dynamics refitted", dyn=True, max_nfev=80)
+        results["c2-dyn"] = S.report(s, "(c2) second cell with the state constants refitted", items=True)
+        s, _ = fit_candidate(S, 6, [base.n, base.gam], [0.3, 0.5], [3.0, 4.0], [0.05, 0.05], "(c3) cell law after the integration: n, gamma, dynamics refitted", dyn=True, max_nfev=80)
+        results["c3"] = S.report(s, "(c3) cell law after the integration: states chase the light, cond = (sum w s)^gamma", items=True)
         print("\n== summary (H3 / H5 / H7 error rms over the 27 items; statics t20; fine knee t20/t10; bursts weighted/plain)")
         for k, v in results.items():
             print(f"   {k:8s} H3 {v['h3all']:.2f} (100 Hz {v['h3'][100][0]:.2f}, 1 kHz {v['h3'][1000][0]:.2f}, 4 kHz {v['h3'][4000][0]:.2f}) | H5 {v['h5all']:.2f} ({v['h3'][100][1]:.1f}, {v['h3'][1000][1]:.1f}, {v['h3'][4000][1]:.1f}) | "

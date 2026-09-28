@@ -20,13 +20,15 @@ Four parts, each a table on stdout (and, with --out, a markdown file plus a JSON
              ours against the reference;
   steps      the pink-noise level steps as a static curve on noise, per ratio and ballistic setting;
   series     the two-stage settings decomposed: each plugin's discrete stage fed with the reference's optical output;
+  interaction the two stages' interaction on sines: one instance against the series of parts, and a stereo probe that separates
+             the discrete detector's share from the optical loop's;
   ballistics whether the reference's detector changes with the ratio switch (step response at 4:1, FLOOD and 2:1).
 Results of every part merge into <out>/results.json, so parts can be rerun one at a time.
 
 The reference is driven through fit/measure/pa.py (its own parameter names); the model through fit/hvmc_core.py, the ctypes bridge
 to the engine the plugin runs (bit-identical to the VST3 through Pedalboard: --check-vst3 prints the null). Signals: the real mix
 (default ~/shadow/listen_test/01_dry_house_mix.wav) at 0, -6 and -12 dB, and synthetic programme built here with numpy.
-usage: python3 fit/tools/program_audit.py [--mix path] [--parts grid,localise,steps,charge,routing,series,ballistics] [--quick] [--out build/program_audit]
+usage: python3 fit/tools/program_audit.py [--mix path] [--parts grid,localise,steps,charge,routing,series,interaction,ballistics] [--quick] [--out build/program_audit]
        [--plots] [--check-vst3]
 Needs the licensed reference plug-in; not part of the test suite."""
 import argparse, json, os, sys, time
@@ -426,6 +428,37 @@ def part_series(R, SIG):
             print(f"{sname[:40]:40s} {gname:10s} both {both['level_db']:+.2f}/{both['d100_rms']:.2f} | opto {opto['level_db']:+.2f} | disc(raw) {disc_raw['level_db']:+.2f}/{disc_raw['d100_rms']:.2f} (ref GR {disc_raw['gr_ref_db']:.1f}) | disc(ref opto out) {disc_on_opto['level_db']:+.2f}/{disc_on_opto['d100_rms']:.2f} (ref GR {disc_on_opto['gr_ref_db']:.1f}; crest {crest_db(x):.1f} -> {crest_db(xo):.1f})")
     return out
 
+def part_interaction(R):
+    """the two stages' interaction on sines: the reference in one instance against its own series of parts (its optical output rendered,
+    then its discrete stage), per level; then the stereo probe (L loud, R at -40 dBFS, STEREO: R carries the linked discrete gain
+    reduction with no optical gain reduction, so R isolates the discrete detector's share and L minus R the optical loop's)"""
+    print("\n== interaction: 'both' minus series-of-parts (dB, + = both louder), 1 kHz sines; ref / ours\n")
+    fs = FS; out = {}
+    for ratio, dthr in (("4:1", 16), ("Flood", 20), ("2:1", 14), ("4:1", 1)):
+        cells = []
+        for lvl in (-40, -30, -20, -10, 0):
+            x = stereo(10 ** (lvl / 20) * np.sin(2 * np.pi * 1000 * np.arange(int(3 * fs)) / fs))
+            kb = S_(OPTO, DISC, optical_threshold=22, discrete_threshold=dthr, discrete_ratio=ratio, mode="Dual Mono")
+            ko = {**kb, "discrete_bypass": "Out"}; kd = {**kb, "optical_bypass": "Out"}; n0 = -int(1.0 * fs)
+            r = {}
+            for lab, f in (("ref", R.ref), ("ours", R.ours)):
+                yb = f(x, fs, kb); yo = f(x, fs, ko); ys = f(yo.astype(np.float32), fs, kd)
+                r[lab] = float(db(rms(yb[0, n0:])) - db(rms(ys[0, n0:])))
+            out[("level", f"opto22 -> {ratio} thr{dthr}", lvl)] = r; cells.append(f"{lvl:+d}: {r['ref']:+.2f}/{r['ours']:+.2f}")
+        print(f"opto 22 -> {ratio} thr{dthr:2d}: " + "  ".join(cells))
+    print("\n   stereo probe, L at 0 dBFS / R at -40 dBFS, STEREO: both minus series per channel; ref L/R, ours L/R")
+    t = np.arange(int(3 * fs)) / fs
+    for ratio, dthr in (("Flood", 20), ("4:1", 16)):
+        x = stereo(np.sin(2 * np.pi * 1000 * t), 10 ** (-40 / 20) * np.sin(2 * np.pi * 1000 * t))
+        kb = S_(OPTO, DISC, optical_threshold=22, discrete_threshold=dthr, discrete_ratio=ratio, mode="Stereo")
+        ko = {**kb, "discrete_bypass": "Out"}; kd = {**kb, "optical_bypass": "Out"}; n0 = -int(1.0 * fs); r = {}
+        for lab, f in (("ref", R.ref), ("ours", R.ours)):
+            yb = f(x, fs, kb); yo = f(x, fs, ko); ys = f(yo.astype(np.float32), fs, kd)
+            r[lab] = [float(db(rms(yb[c, n0:])) - db(rms(ys[c, n0:]))) for c in (0, 1)]
+        out[("stereo", f"opto22 -> {ratio} thr{dthr}", 0)] = r
+        print(f"   opto 22 -> {ratio} thr{dthr}: ref L {r['ref'][0]:+.2f} R {r['ref'][1]:+.2f} | ours L {r['ours'][0]:+.2f} R {r['ours'][1]:+.2f}")
+    return out
+
 def part_ratio_ballistics(R):
     """does the reference's detector change with the ratio switch? A -50 -> -10 dBFS step and a 300 ms burst at 4:1 and at FLOOD, 1 ms /
     0.5 s, threshold 16: the gain per 1 kHz period from the step, normalised by the settled gain reduction, ours against the reference"""
@@ -471,7 +504,7 @@ def plots(R, SIG, grid, outdir):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--mix", default=os.path.expanduser("~/shadow/listen_test/01_dry_house_mix.wav"))
-    ap.add_argument("--parts", default="grid,localise,steps,charge,routing,series,ballistics")
+    ap.add_argument("--parts", default="grid,localise,steps,charge,routing,series,interaction,ballistics")
     ap.add_argument("--quick", action="store_true", help="12 s of the mix only")
     ap.add_argument("--out", default=os.path.join(ROOT, "build", "program_audit"), help="folder for results.json and figures")
     ap.add_argument("--plots", action="store_true"); ap.add_argument("--check-vst3", action="store_true")
@@ -489,6 +522,7 @@ def main():
     if "charge" in parts: res["charge"] = {" | ".join(k): v for k, v in part_charge(R).items()}
     if "routing" in parts: res["routing"] = {" | ".join(k): v for k, v in part_routing(R, SIG).items()}
     if "series" in parts: res["series"] = {" | ".join(k): v for k, v in part_series(R, SIG).items()}
+    if "interaction" in parts: res["interaction"] = {f"{k[0]} | {k[1]} | {k[2]}": v for k, v in part_interaction(R).items()}
     if "ballistics" in parts: res["ballistics"] = {f"{k[0]} | {k[1]}": v for k, v in part_ratio_ballistics(R).items()}
     os.makedirs(a.out, exist_ok=True)
     fn = os.path.join(a.out, "results.json")

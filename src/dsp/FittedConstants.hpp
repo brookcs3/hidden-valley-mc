@@ -8,14 +8,14 @@
 // stage3: discrete: static family (disc_static_*), detector (disc_ar_*, disc_al_*, disc_burst_*, disc_dual_*), make-up offsets (disc_gi_*), cell terms (disc_harm_nogr_*)
 // stage4: optical stage (docs/opto-fix.md): amplifier terms (opto_harm_nogr_*), joint shape/dynamics/harmonics on the mirror (opto_static_t{6,10,14,18,20,22,24}_*, opto_burst_*, opto_blen_*, opto_pulses, 13 opto_harm_t* items), knee per position (opto_static_t*), sidechain low pass (opto_static_f3000_*, f8000_*)
 // stage5: sidechain corner from scf_disc_*_In, link scale from link_disc_*; MEASURED UNIT constants from the hardware evidence (not fitted to the reference): 18 kHz pole, HF loss corner 41081 Hz / k 3.97, cell a2 0.0448; HARDWARE Iron lift and noise at their priors
-// fields still at their priors (no stage has written them): ca_in_db, ca_out_db, ca_in_fl_hz, ca_in_lp_hz, ca_a2, ca_a3, ca_a2_env, ca_ceil_db, ca_ceil_q, ca_ceil_asym_db, ca_d_a2_scale, ca_noise_db
+// fields still at their priors (no stage has written them): d_inter_db, d_scf_trim_db, ca_in_db, ca_out_db, ca_in_fl_hz, ca_in_lp_hz, ca_a2, ca_a3, ca_a2_env, ca_ceil_db, ca_ceil_q, ca_ceil_asym_db, ca_d_a2_scale, ca_noise_db
 #pragma once
 #include <cstdint>
 #define HVMC_FITTED_CONSTANTS 1
 namespace hvmc {
-static constexpr uint64_t kFittedLayoutHash = 0x93c6d2ea4f35cb89ull;
-static constexpr int kFittedCount = 791;
-static const double kFittedValues[791] = {
+static constexpr uint64_t kFittedLayoutHash = 0x65be2a9a763459b5ull;
+static constexpr int kFittedCount = 793;
+static const double kFittedValues[793] = {
     // sc_hz [0..0]
     88.539474681480385,
     // o_thr_db [1..24]
@@ -198,63 +198,67 @@ static const double kFittedValues[791] = {
     14.565457288195745,
     // d_link [741..741]
     0.50488248101188116,
-    // d_a2 [742..742]
+    // d_inter_db [742..742] (prior)
+    2.1400000000000001,
+    // d_scf_trim_db [743..743] (prior)
+    0.64000000000000001,
+    // d_a2 [744..744]
     0.0028861015470569959,
-    // d_a3 [743..743]
+    // d_a3 [745..745]
     0.0015822206948141676,
-    // d_hwunit_a2 [744..744]
+    // d_hwunit_a2 [746..746]
     0.044774422771366784,
-    // x_gain_db [745..747]
+    // x_gain_db [747..749]
     -0.028841013400318805, -0.21518943755749151, 0.10799655204064858,
-    // x_a2 [748..750]
+    // x_a2 [750..752]
     7.7951343429115129e-06, 7.9439668747256136e-05, 7.3834922059016506e-06,
-    // x_a3 [751..753]
+    // x_a3 [753..755]
     -0.00014170320132637654, -0.00086185291632782978, -0.00013585230059477013,
-    // x_fl_hz [754..756]
+    // x_fl_hz [756..758]
     1.708731579877085, 4.3845449884096563, 1.4395061737720638,
-    // x_sat_db [757..759]
+    // x_sat_db [759..761]
     5.3994693810990144, 5.4219362481026598, 5.9755414571677292,
-    // x_q [760..762]
+    // x_q [762..764]
     8.2899689755094368, 8.2422575575329482, 8.2211507897381004,
-    // x_asym [763..765]
+    // x_asym [765..767]
     0.023629300069866972, 0.029939379663853814, 0.031881459457272651,
-    // x_hs_hz [766..768]
+    // x_hs_hz [768..770]
     9512.0761145140277, 12205.460280422372, 14234.255363478911,
-    // x_hs_db [769..771]
+    // x_hs_db [771..773]
     -0.20069445327521293, -0.37592965067846407, -0.67255637357470122,
-    // x_lp_hz [772..774]
+    // x_lp_hz [774..776]
     71903.9900580049, 71724.173033765299, 24375.24516246749,
-    // hw_iron_lift_db [775..775]
+    // hw_iron_lift_db [777..777]
     0.40000000000000002,
-    // hw_iron_lift_hz [776..776]
+    // hw_iron_lift_hz [778..778]
     32,
-    // hw_iron_lift_q [777..777]
+    // hw_iron_lift_q [779..779]
     0.55000000000000004,
-    // hw_iron_noise_db [778..778]
+    // hw_iron_noise_db [780..780]
     -96,
-    // ca_in_db [779..779] (prior)
+    // ca_in_db [781..781] (prior)
     2.5,
-    // ca_out_db [780..780] (prior)
+    // ca_out_db [782..782] (prior)
     0,
-    // ca_in_fl_hz [781..781] (prior)
+    // ca_in_fl_hz [783..783] (prior)
     0,
-    // ca_in_lp_hz [782..782] (prior)
+    // ca_in_lp_hz [784..784] (prior)
     0,
-    // ca_a2 [783..783] (prior)
+    // ca_a2 [785..785] (prior)
     8.0000000000000007e-05,
-    // ca_a3 [784..784] (prior)
+    // ca_a3 [786..786] (prior)
     -0.00072000000000000005,
-    // ca_a2_env [785..785] (prior)
+    // ca_a2_env [787..787] (prior)
     0.25,
-    // ca_ceil_db [786..786] (prior)
+    // ca_ceil_db [788..788] (prior)
     13,
-    // ca_ceil_q [787..787] (prior)
+    // ca_ceil_q [789..789] (prior)
     8,
-    // ca_ceil_asym_db [788..788] (prior)
+    // ca_ceil_asym_db [790..790] (prior)
     1,
-    // ca_d_a2_scale [789..789] (prior)
+    // ca_d_a2_scale [791..791] (prior)
     1,
-    // ca_noise_db [790..790] (prior)
+    // ca_noise_db [792..792] (prior)
     -96,
 };
 } // namespace hvmc
