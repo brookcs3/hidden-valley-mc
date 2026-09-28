@@ -70,7 +70,7 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install pedalboard==0.9.21
 ```
 
-Pass the outer `.vst3` folder, not the binary inside it. Pedalboard lowercases the parameter names (the plugin declares `L_optical_threshold`; Python sees `l_optical_threshold`). Every value must be one of the parameter's positions, given as the panel legend: `comp.parameters["l_discrete_ratio"].valid_values` lists them. In STEREO the left-channel controls drive both channels and the `r_` parameters do nothing, as on the unit; METER SELECT stays independent per channel.
+Pass the outer `.vst3` folder, not the binary inside it (on Windows, Pedalboard 0.9 cannot scan a bundle folder: pass the DLL inside it, `HiddenValleyMC.vst3\Contents\x86_64-win\HiddenValleyMC.vst3`). Pedalboard lowercases the parameter names (the plugin declares `L_optical_threshold`; Python sees `l_optical_threshold`). Every value must be one of the parameter's positions, given as the panel legend: `comp.parameters["l_discrete_ratio"].valid_values` lists them. In STEREO the left-channel controls drive both channels and the `r_` parameters do nothing, as on the unit; METER SELECT stays independent per channel.
 
 ```python
 import os

@@ -73,7 +73,12 @@ if bundle.endswith(".component"):
     print(f"Audio Unit: the example loads {au_path} in place of ~/.vst3/HiddenValleyMC.vst3; everything else runs as written")
 work = os.path.join(ROOT, "build", "readme-examples")
 shutil.rmtree(work, ignore_errors=True)
-shutil.copytree(bundle, os.path.join(work, path[2:]))
+if sys.platform == "win32" and os.path.isdir(bundle):
+    # Pedalboard's Windows host loads a single-file VST3 but not a bundle folder: install the DLL as ~/.vst3/HiddenValleyMC.vst3
+    os.makedirs(os.path.dirname(os.path.join(work, path[2:])), exist_ok=True)
+    shutil.copy2(os.path.join(bundle, "Contents", "x86_64-win", os.path.basename(bundle)), os.path.join(work, path[2:]))
+else:
+    shutil.copytree(bundle, os.path.join(work, path[2:]))
 hvmc_pb.au_register.register(os.path.join(work, path[2:]))
 open(os.path.join(work, "readme_example.py"), "w").write(example)
 fs = 48000; t = np.arange(2 * fs) / fs

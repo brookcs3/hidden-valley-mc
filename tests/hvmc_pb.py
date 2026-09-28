@@ -35,6 +35,10 @@ def default_bundle():
 def load(bundle):
     bundle = os.path.abspath(os.path.expanduser(bundle))
     au_register.register(bundle)
+    if sys.platform == "win32" and os.path.isdir(bundle):
+        # Pedalboard's Windows host fails to scan a .vst3 bundle folder but loads the DLL inside it (verified on windows-latest)
+        inner = os.path.join(bundle, "Contents", "x86_64-win", os.path.basename(bundle))
+        if os.path.isfile(inner): bundle = inner
     return pedalboard.load_plugin(bundle)
 
 
