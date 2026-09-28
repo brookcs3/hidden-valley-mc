@@ -8,6 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$ROOT/build/capi"
 CXX="${CXX:-c++}"
-case "$(uname -s)" in Darwin) EXT=dylib; PREFIX=lib ;; MINGW*|MSYS*|CYGWIN*) EXT=dll; PREFIX= ;; *) EXT=so; PREFIX=lib ;; esac
-"$CXX" -std=gnu++17 -O2 -fno-fast-math -Wall -Wextra -shared -fPIC -I"$ROOT/src" -o "$ROOT/build/capi/${PREFIX}hvmc.$EXT" "$ROOT/src/capi/hvmc_capi.cpp"
+EXTRA=()
+case "$(uname -s)" in Darwin) EXT=dylib; PREFIX=lib ;; MINGW*|MSYS*|CYGWIN*) EXT=dll; PREFIX=; EXTRA=(-static -static-libgcc -static-libstdc++) ;; *) EXT=so; PREFIX=lib ;; esac   # Windows: no MinGW runtime DLLs needed, as for the plugin
+"$CXX" -std=gnu++17 -O2 -fno-fast-math -Wall -Wextra -shared -fPIC -I"$ROOT/src" ${EXTRA[@]+"${EXTRA[@]}"} -o "$ROOT/build/capi/${PREFIX}hvmc.$EXT" "$ROOT/src/capi/hvmc_capi.cpp"
 echo "== built build/capi/${PREFIX}hvmc.$EXT"
