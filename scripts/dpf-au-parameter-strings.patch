@@ -1,0 +1,163 @@
+Local change to DPF (commit 4238e1c7f0351bbe488d79f0899c540543ac7583) for the macOS Audio Unit, ISC like the file it changes.
+scripts/build-macos.sh applies it to a copy of DPF in build/macos/DPF; third_party/DPF stays exactly as cloned. It touches only the
+AU wrapper, distrho/src/DistrhoPluginAU.cpp, which neither the Linux nor the VST3 build compiles.
+DPF's AU wrapper does not publish parameter value names (its own TODO: "scale points to kAudioUnitParameterFlag_ValuesHaveStrings"),
+so AU hosts would show position numbers (0 to 10) where the VST3 shows the panel legends (22 to 1000 Hz, BOOST / OUT / CUT, ...).
+This sets kAudioUnitParameterFlag_ValuesHaveStrings on parameters with enumeration values and answers
+kAudioUnitProperty_ParameterValueStrings (indexed parameters), kAudioUnitProperty_ParameterStringFromValue and
+kAudioUnitProperty_ParameterValueFromString from those values.
+
+diff --git a/distrho/src/DistrhoPluginAU.cpp b/distrho/src/DistrhoPluginAU.cpp
+index 919faa71..cc585487 100644
+--- a/distrho/src/DistrhoPluginAU.cpp
++++ b/distrho/src/DistrhoPluginAU.cpp
+@@ -16,7 +16,6 @@
+ 
+ // TODO
+ // - g_nextBundlePath vs d_nextBundlePath cleanup
+-// - scale points to kAudioUnitParameterFlag_ValuesHaveStrings
+ // - report latency changes
+ 
+ #include "DistrhoPluginInternal.hpp"
+@@ -509,6 +508,34 @@ public:
+         return noErr;
+     }
+ 
++    // an indexed parameter whose positions all have enumeration labels can publish them as value strings
++    bool parameterHasValueStrings(const uint32_t index) const
++    {
++        const uint32_t hints = fPlugin.getParameterHints(index);
++
++        if ((hints & kParameterIsInteger) == 0x0 || (hints & kParameterIsBoolean) != 0x0)
++            return false;
++
++        return fPlugin.getParameterEnumValues(index).count != 0;
++    }
++
++    // the enumeration label for a parameter value (integer parameters are rounded first), retained, or null if none matches
++    CFStringRef copyParameterValueLabel(const uint32_t index, float value) const
++    {
++        const ParameterEnumerationValues& enumValues(fPlugin.getParameterEnumValues(index));
++
++        if (fPlugin.getParameterHints(index) & kParameterIsInteger)
++            value = std::round(value);
++
++        for (uint32_t i = 0; i < enumValues.count; ++i)
++        {
++            if (d_isEqual(enumValues.values[i].value, value))
++                return CFStringCreateWithCString(nullptr, enumValues.values[i].label, kCFStringEncodingUTF8);
++        }
++
++        return nullptr;
++    }
++
+     OSStatus auGetPropertyInfo(const AudioUnitPropertyID inProp,
+                                const AudioUnitScope inScope,
+                                const AudioUnitElement inElement,
+@@ -568,6 +595,26 @@ public:
+             outWritable = false;
+             return noErr;
+ 
++        case kAudioUnitProperty_ParameterValueStrings:
++            // names for the positions of an indexed (integer, non-boolean) parameter with enumeration values
++            if (inScope != kAudioUnitScope_Global || inElement >= fParameterCount || ! parameterHasValueStrings(inElement))
++                return kAudioUnitErr_InvalidProperty;
++            outDataSize = sizeof(CFArrayRef);
++            outWritable = false;
++            return noErr;
++
++        case kAudioUnitProperty_ParameterStringFromValue:
++            DISTRHO_SAFE_ASSERT_UINT_RETURN(inScope == kAudioUnitScope_Global, inScope, kAudioUnitErr_InvalidScope);
++            outDataSize = sizeof(AudioUnitParameterStringFromValue);
++            outWritable = false;
++            return noErr;
++
++        case kAudioUnitProperty_ParameterValueFromString:
++            DISTRHO_SAFE_ASSERT_UINT_RETURN(inScope == kAudioUnitScope_Global, inScope, kAudioUnitErr_InvalidScope);
++            outDataSize = sizeof(AudioUnitParameterValueFromString);
++            outWritable = false;
++            return noErr;
++
+        #if 0
+         case kAudioUnitProperty_FastDispatch:
+             DISTRHO_SAFE_ASSERT_UINT_RETURN(inScope == kAudioUnitScope_Global, inScope, kAudioUnitErr_InvalidScope);
+@@ -916,7 +963,8 @@ public:
+                     else
+                         info->unit = kAudioUnitParameterUnit_Generic;
+ 
+-                    // | kAudioUnitParameterFlag_ValuesHaveStrings;
++                    if (fPlugin.getParameterEnumValues(inElement).count != 0)
++                        info->flags |= kAudioUnitParameterFlag_ValuesHaveStrings;
+ 
+                     const String& name(fPlugin.getParameterName(inElement));
+                     d_strncpy(info->name, name, sizeof(info->name));
+@@ -929,6 +977,69 @@ public:
+             }
+             return noErr;
+ 
++        case kAudioUnitProperty_ParameterValueStrings:
++            {
++                // one name per position from min to max; the host releases the array
++                const ParameterRanges& ranges(fPlugin.getParameterRanges(inElement));
++                const int count = static_cast<int>(ranges.max - ranges.min + 0.5f) + 1;
++                CFMutableArrayRef const array = CFArrayCreateMutable(nullptr, count, &kCFTypeArrayCallBacks);
++
++                for (int i = 0; i < count; ++i)
++                {
++                    const float value = ranges.min + static_cast<float>(i);
++                    CFStringRef str = copyParameterValueLabel(inElement, value);
++                    if (str == nullptr)
++                        str = CFStringCreateWithFormat(nullptr, nullptr, CFSTR("%g"), static_cast<double>(value));
++                    CFArrayAppendValue(array, str);
++                    CFRelease(str);
++                }
++
++                *static_cast<CFArrayRef*>(outData) = array;
++            }
++            return noErr;
++
++        case kAudioUnitProperty_ParameterStringFromValue:
++            {
++                // the enumeration label of the value (or of the current value when inValue is null), or no string
++                AudioUnitParameterStringFromValue* const sfv = static_cast<AudioUnitParameterStringFromValue*>(outData);
++                DISTRHO_SAFE_ASSERT_UINT_RETURN(sfv->inParamID < fParameterCount, sfv->inParamID, kAudioUnitErr_InvalidParameter);
++
++                const float value = sfv->inValue != nullptr ? *sfv->inValue : fPlugin.getParameterValue(sfv->inParamID);
++                sfv->outString = copyParameterValueLabel(sfv->inParamID, value);
++            }
++            return noErr;
++
++        case kAudioUnitProperty_ParameterValueFromString:
++            {
++                // the value of an enumeration label, else the string read as a number
++                AudioUnitParameterValueFromString* const vfs = static_cast<AudioUnitParameterValueFromString*>(outData);
++                DISTRHO_SAFE_ASSERT_UINT_RETURN(vfs->inParamID < fParameterCount, vfs->inParamID, kAudioUnitErr_InvalidParameter);
++                DISTRHO_SAFE_ASSERT_RETURN(vfs->inString != nullptr, kAudio_ParamError);
++
++                char text[256];
++                if (! CFStringGetCString(vfs->inString, text, sizeof(text), kCFStringEncodingUTF8))
++                    return kAudioUnitErr_InvalidPropertyValue;
++
++                const ParameterEnumerationValues& enumValues(fPlugin.getParameterEnumValues(vfs->inParamID));
++                for (uint32_t i = 0; i < enumValues.count; ++i)
++                {
++                    if (enumValues.values[i].label == text)
++                    {
++                        vfs->outValue = enumValues.values[i].value;
++                        return noErr;
++                    }
++                }
++
++                char* end = nullptr;
++                const double number = std::strtod(text, &end);
++                if (end == text)
++                    return kAudioUnitErr_InvalidPropertyValue;
++
++                const ParameterRanges& ranges(fPlugin.getParameterRanges(vfs->inParamID));
++                vfs->outValue = ranges.getFixedValue(static_cast<float>(number));
++            }
++            return noErr;
++
+        #if 0
+         case kAudioUnitProperty_FastDispatch:
+             switch (inElement)

@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: 2026 Cameron Brooks
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Build and test on Linux (x86_64 and aarch64), macOS (universal VST3 and AU) and Windows (x64 VST3), and keep the built bundles as
+# artifacts. The tests are the repository's own: the DSP unit tests during each build, then Pedalboard on the built plugin.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config git libatomic1
+      - name: Build (DSP unit tests, then the VST3)
+        run: scripts/build.sh
+      - name: Test with Pedalboard
+        run: |
+          python -m pip install -r tests/requirements.txt
+          scripts/test.sh build/bin/HiddenValleyMC.vst3
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HiddenValleyMC-linux-${{ matrix.arch }}
+          path: build/bin/
+
+  macos:
+    name: macOS universal
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Rosetta 2 (for the x86_64 unit-test run)
+        run: sudo softwareupdate --install-rosetta --agree-to-license || echo "Rosetta 2 not installed; the x86_64 unit tests are skipped"
+      - name: Build (DSP unit tests on both architectures, then the VST3 and the AU)
+        run: scripts/build-macos.sh
+      - name: Test the VST3 and the AU with Pedalboard
+        run: |
+          python -m pip install -r tests/requirements.txt
+          scripts/test.sh build/macos/bin/HiddenValleyMC.vst3
+          scripts/test.sh build/macos/bin/HiddenValleyMC.component
+      - name: Validate the AU with auval
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/macos/bin/HiddenValleyMC.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          for _ in $(seq 1 15); do auval -s aufx 2>/dev/null | grep -q "CPeq Cbrk" && break; sleep 2; done
+          auval -strict -v aufx CPeq Cbrk
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HiddenValleyMC-macos-universal
+          path: |
+            build/macos/bin/HiddenValleyMC.vst3
+            build/macos/bin/HiddenValleyMC.component
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: make git mingw-w64-x86_64-gcc
+      - name: Build (DSP unit tests, run natively, then the VST3)
+        shell: msys2 {0}
+        run: scripts/build-windows.sh
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Test with Pedalboard
+        shell: bash
+        run: |
+          python -m pip install -r tests/requirements.txt
+          python tests/crosscheck.py build/windows/tests/cpp_reference.json
+          python tests/pb_load.py build/windows/bin/HiddenValleyMC.vst3
+          python tests/readme_examples.py build/windows/bin/HiddenValleyMC.vst3
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HiddenValleyMC-windows-x64
+          path: build/windows/bin/

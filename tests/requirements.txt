@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Cameron Brooks
+# SPDX-License-Identifier: GPL-3.0-only
+# Python packages for the Pedalboard tests (tests/*.py), pinned to the versions the release was verified with. The fitting pipeline
+# (fit/) needs numba as well; see fit/README.md.
+pedalboard==0.9.21
+numpy==2.3.5
+scipy==1.18.1
